@@ -250,7 +250,8 @@ int main(void) {
   #endif
   
   while(1) {
-    #ifdef ENCODER
+
+       #ifdef ENCODER
       if (!encoder.ini){
         // Try to re-initialize the encoder if not yet initialized
         Encoder_Init();
@@ -264,7 +265,6 @@ int main(void) {
     #endif
     
     if (buzzerTimer - buzzerTimer_prev > 16*DELAY_IN_MAIN_LOOP) {   // 1 ms = 16 ticks buzzerTimer
-   
 
     readCommand();                        // Read Command: input1[inIdx].cmd, input2[inIdx].cmd
     calcAvgSpeed();                       // Calculate average measured speed: speedAvg, speedAvgAbs

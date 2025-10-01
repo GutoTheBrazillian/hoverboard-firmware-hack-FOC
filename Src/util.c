@@ -38,6 +38,12 @@
 
 /* =========================== Variable Definitions =========================== */
 
+// Timebase: buzzerTimer ticks at 16 ticks per millisecond (see main.c)
+#ifndef TICKS_PER_MS
+#define TICKS_PER_MS 16U
+#endif
+#define T_MS(ms) ((uint32_t)((ms) * TICKS_PER_MS))
+
 //------------------------------------------------------------------------
 // Global variables set externally
 //------------------------------------------------------------------------
@@ -63,9 +69,6 @@ extern uint8_t nunchuk_data[6];
 extern volatile uint32_t timeoutCntGen; // global counter for general timeout counter
 extern volatile uint8_t  timeoutFlgGen; // global flag for general timeout counter
 extern volatile uint32_t main_loop_counter;
-uint8_t hall_ul = 0;
-uint8_t hall_vl = 0;
-uint8_t hall_wl = 0;
 #if defined(CONTROL_PPM_LEFT) || defined(CONTROL_PPM_RIGHT)
 extern volatile uint16_t ppm_captured_value[PPM_NUM_CHANNELS+1];
 #endif
@@ -241,9 +244,6 @@ void BLDC_Init(void) {
   /* Set BLDC controller parameters */ 
   #ifdef ENCODER
   rtP_Left.b_angleMeasEna       = 1;            // Motor angle input: 0 = estimated angle, 1 = measured angle (e.g. if encoder is available)
-            hall_ul = 0;
-            hall_vl = 1;
-            hall_wl = 0;
    #else
   rtP_Left.b_angleMeasEna       = 0;            // Motor angle input: 0 = estimated angle, 1 = measured angle (e.g. if encoder is available)
    #endif
@@ -504,23 +504,24 @@ void Encoder_Align_Start(void) {
     }
     
     enable = 1;
-    //rtP_Left.b_diagEna = 1; // Disable diagnostics during alignment
-    rtP_Left.b_angleMeasEna = 0;
+    rtP_Left.b_diagEna = 0; // Disable diagnostics during alignment
     encoder.align_state = 1; // Start alignment sequence
     encoder.align_timer = 0;
     encoder.align_start_time = buzzerTimer;
     encoder.align_ini_pos = encoder_handle.Instance->CNT;
-    
     // Initialize simulation variables
     encoder.simulated_mech_count = encoder.align_ini_pos; // Start from current position
     encoder.power_ramp_timer = buzzerTimer;
     
-    // Calculate count increment for 5 electrical rotations in 3000ms
-    // 5 electrical rotations = 5/15 mechanical rotations = 1/3 mechanical rotation
-    // 1/3 mech rotation = ENCODER_CPR/3 counts over 3000ms
-    // Increment per ms = (ENCODER_CPR/3)/3000 = ENCODER_CPR/9000
-    // Multiply by 1000 for precision: count_increment_x1000 = ENCODER_CPR * 1000 / 9000
-    encoder.count_increment_x1000 = (ENCODER_CPR * 1000) / 9000;
+  // Calculate count increment for 5.256 electrical rotations in 3000ms (5 + 92°/360°)
+  // This compensates for the electrical offset to naturally reach 0° electrical  
+  // 5.256 electrical rotations = 5.256/15 mechanical rotations = 0.3504 mechanical rotation
+  // 0.3504 mech rotation = (0.3504 * ENCODER_CPR) counts over 3000ms
+  // Timebase: buzzerTimer runs at 16 ticks/ms -> total ticks = 3000 * 16 = 48000
+  // Increment per tick = (0.3504 * ENCODER_CPR) / 48000
+  // Store as per-tick * 1000 for precision: (0.3504 * ENCODER_CPR * 1000) / 48000
+  // Using integer math: (3504 * ENCODER_CPR * 1000) / (10000 * 48000) = (3504 * ENCODER_CPR) / 480000
+  encoder.count_increment_x1000 = (int32_t)((((int64_t)ENCODER_CPR) * 3430) / 480000);
     
     
     encoder.align_inpTgt = 0; // Start with 0 power, will ramp up
@@ -534,68 +535,69 @@ void Encoder_Align_Start(void) {
 
 // Non-blocking encoder alignment with mechanical angle simulation - call from main loop
 void Encoder_Align(void) {
-    if (encoder.align_state == 0) {
-        return; // No alignment in progress
-    }
     
-    uint32_t current_time = buzzerTimer;
-    uint32_t elapsed_time = current_time - encoder.align_start_time;
-    uint32_t power_ramp_time = current_time - encoder.power_ramp_timer;
+  uint32_t current_time = buzzerTimer;
+  uint32_t elapsed_ticks = current_time - encoder.align_start_time;   // in ticks
+  uint32_t ramp_ticks    = current_time - encoder.power_ramp_timer;   // in ticks
     
     switch (encoder.align_state) {
-        case 1: // Power ramp up phase - slowly increase target to ALIGNMENT_VOLTAGE in 500ms
-            // Hold simulated count at initial position (maintain current electrical angle)
-            encoder.simulated_mech_count = encoder.align_ini_pos;
+   
             
-            // Ramp power from 0 to ALIGNMENT_VOLTAGE over 500ms
-            if (power_ramp_time < 500) {
-                // Linear ramp: target = (ALIGNMENT_VOLTAGE * elapsed_time) / 500
-                encoder.align_inpTgt = (int16_t)((ALIGNMENT_VOLTAGE * power_ramp_time) / 500);
-            } else {
-                // Ramp complete, full power
-                
-                // Move to next state
-                encoder.align_state = 2;
-                encoder.align_timer = current_time;
+        case 1: // Rotation phase - 5.167 electrical rotations in 3 seconds, end at 0° electrical
+            // Smooth deceleration in last 500ms to prevent sudden stop
+            if (ramp_ticks < T_MS(500)) {
+                // Linear ramp: target = (ALIGNMENT_VOLTAGE * ramp_ticks) / T_MS(500)
+                encoder.align_inpTgt = (int16_t)((ALIGNMENT_VOLTAGE * ramp_ticks) / T_MS(500));
+            } else if (elapsed_ticks < T_MS(2500)) {
+                // Full speed rotation for first 2.5 seconds
+                encoder.align_inpTgt = ALIGNMENT_VOLTAGE;
+            } else if (elapsed_ticks < T_MS(3000)) {
+                // Smooth deceleration over last 500ms
+                uint32_t decel_ticks = elapsed_ticks - T_MS(2500);
+                encoder.align_inpTgt = (int16_t)(ALIGNMENT_VOLTAGE - (ALIGNMENT_VOLTAGE * decel_ticks) / T_MS(500));
             }
-            break;
             
-        case 2: // Rotation phase - 5 electrical rotations in 3 seconds, end at 0° electrical
-            // Maintain current power
-            if (elapsed_time < 3000) {
+            if (elapsed_ticks < T_MS(3000)) {
                 // Calculate simulated position increment
-                int32_t total_increment = (encoder.count_increment_x1000 * elapsed_time) / 1000;
+                // count_increment_x1000 is per tick * 1000
+                int32_t total_increment = (int32_t)(((int64_t)encoder.count_increment_x1000 * (int64_t)elapsed_ticks) / 1000);
                 encoder.simulated_mech_count = encoder.align_ini_pos + total_increment;
                 
                 // Handle encoder wraparound
                 encoder.simulated_mech_count = (encoder.simulated_mech_count % (int32_t)ENCODER_CPR + (int32_t)ENCODER_CPR) % (int32_t)ENCODER_CPR;
             } else {
-                // 3 seconds completed, position to electrical angle 0
-                // Calculate position for 0° electrical angle
+                // 3 seconds completed, snap to 30° electrical instead of 0°
                 // Each electrical rotation = 360°/15 pole pairs = 24° mechanical
-                // 0° electrical corresponds to mechanical angles: 0°, 24°, 48°, 72°, etc.
-                // Find the nearest one to current position
+                // 30° electrical = 30°/360° * 24° = 2° mechanical
                 int32_t counts_per_elec_cycle = ENCODER_CPR / 15; // Counts per electrical rotation
+                int32_t counts_per_degree = ENCODER_CPR / 360;    // Counts per mechanical degree
+                int32_t offset_30_elec = 2 * counts_per_degree+5;  // 30° elec = 2° mech
+                
                 int32_t current_elec_cycle = encoder.simulated_mech_count / counts_per_elec_cycle;
-                encoder.simulated_mech_count = current_elec_cycle * counts_per_elec_cycle; // Snap to 0° electrical
+                encoder.simulated_mech_count = current_elec_cycle * counts_per_elec_cycle + offset_30_elec; // Snap to 30° electrical
+                
+                // Handle encoder wraparound after adding offset
+                encoder.simulated_mech_count = (encoder.simulated_mech_count % (int32_t)ENCODER_CPR + (int32_t)ENCODER_CPR) % (int32_t)ENCODER_CPR;
                 
                 // Move to centering state
                 encoder.align_state = 3;
-                encoder.power_ramp_timer = current_time;
+                encoder.power_ramp_timer = current_time;   // start high-power ramp timer
             }
             break;
             
         case 3: // High power phase - double current slowly in 500ms, hold 500ms, then measure
             // Calculate power ramp time for this phase
-            if (power_ramp_time < 500) {
+      if (ramp_ticks < T_MS(500)) {
                 // Ramp from ALIGNMENT_VOLTAGE to 2*ALIGNMENT_VOLTAGE over 500ms
-                int16_t power_increase = (ALIGNMENT_VOLTAGE * power_ramp_time) / 500;
-                encoder.align_inpTgt = ALIGNMENT_VOLTAGE + power_increase;
-            } else {
-                // Record real position and calculate offset
-                int32_t final_real_count = encoder_handle.Instance->CNT;
-
-                encoder.align_inpTgt = 0;
+        int16_t power_increase = (int16_t)((ALIGNMENT_VOLTAGE * ramp_ticks) / T_MS(250));
+                encoder.align_inpTgt = power_increase;
+      } else if (ramp_ticks < T_MS(1000)) {
+        // Hold at double power for another 500ms
+        encoder.align_inpTgt = ALIGNMENT_VOLTAGE * 2;
+      } else {
+        // Record real position and calculate offset, then stop
+        int32_t final_real_count = encoder_handle.Instance->CNT;
+        encoder.align_inpTgt = 0;
                 
                 // Calculate offset: difference between simulated and real position
                 encoder.offset = encoder.simulated_mech_count - final_real_count;
@@ -606,7 +608,42 @@ void Encoder_Align(void) {
                 } else if (encoder.offset < -(ENCODER_CPR / 2)) {
                     encoder.offset += ENCODER_CPR;
                 }
+                /* 
+                // ERROR CHECKING: Verify alignment accuracy in electrical degrees
+                int32_t counts_per_elec_cycle = ENCODER_CPR / 15; // Counts per electrical rotation (360° elec)
+                int32_t counts_per_elec_degree = counts_per_elec_cycle / 360; // Counts per electrical degree
                 
+                // Calculate initial and final electrical positions
+                int32_t initial_elec_pos = (encoder.align_ini_pos % counts_per_elec_cycle);
+                int32_t final_elec_pos = (final_real_count % counts_per_elec_cycle);
+                
+                // Calculate electrical angle difference
+                int32_t elec_difference = final_elec_pos - initial_elec_pos;
+                
+                // Handle electrical wraparound
+                if (elec_difference > (counts_per_elec_cycle / 2)) {
+                    elec_difference -= counts_per_elec_cycle;
+                } else if (elec_difference < -(counts_per_elec_cycle / 2)) {
+                    elec_difference += counts_per_elec_cycle;
+                }
+                
+                // Convert to electrical degrees
+                int32_t elec_diff_degrees = (elec_difference * 360) / counts_per_elec_cycle;
+                
+                // Check if difference is more than 1 electrical degree
+                boolean_T alignment_error = (elec_diff_degrees > 1 || elec_diff_degrees < -1) ? 1 : 0;
+                
+                if (alignment_error) {
+                    // Alignment failed - flash LED or buzzer pattern to indicate error
+                    // For now, we'll still mark as aligned but could add error handling
+                    buzzerCount = 0;
+                    buzzerFreq = 50; // Error tone
+                    buzzerPattern = 0b11110000; // Error pattern
+                    encoder.ali = false;
+                }else{
+                  encoder.ali = true;
+                }
+                */
                 // Determine direction based on encoder movement during alignment
                 int32_t encoder_movement = encoder.align_ini_pos - final_real_count;
                 // Handle encoder wraparound
@@ -619,17 +656,11 @@ void Encoder_Align(void) {
                 // Determine direction: 1 if positive movement (CW), 0 if negative (CCW)
                 encoder.direction = (encoder_movement > 0) ? 1 : 0;
                 
-                
-                
-                // Mark alignment complete
+                // Mark alignment complete (even with error for now)
                 encoder.ali = true;
                 encoder.align_state = 0; // Reset state machine
                 
-                // Return to default control mode
-                //rtP_Left.z_ctrlTypSel = FOC_CTRL;
-                //ctrlModReq = CTRL_MOD_REQ;
-                //ctrlModReqRaw = ctrlModReq;
-                //rtP_Left.b_angleMeasEna = 1;
+                
                 //rtP_Left.b_diagEna = DIAG_ENA; // Re-enable diagnostics
             }
             break;

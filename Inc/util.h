@@ -84,7 +84,7 @@ typedef struct {
   int32_t align_ini_pos;             // Initial encoder position before alignment
   // Mechanical angle simulation variables (integer only)
   int32_t simulated_mech_count;      // Simulated encoder count for mechanical angle
-  int32_t count_increment_x1000;    // Count increment per ms * 1000 (for precision)
+  int32_t count_increment_x1000;    // Count increment per tick * 1000 (for precision)
   uint32_t power_ramp_timer;         // Timer for power ramping phases
 } SensorState;
 extern SensorState encoder;

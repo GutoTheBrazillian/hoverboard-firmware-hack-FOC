@@ -54,11 +54,6 @@ static int16_t pwm_margin;              /* This margin allows to have a window i
 extern uint8_t ctrlModReq;
 static int16_t curDC_max = (I_DC_MAX * A2BIT_CONV);
 
-#ifdef ENCODER
-extern uint8_t hall_ul;
-extern uint8_t hall_vl;  
-extern uint8_t hall_wl;
-#endif
 
 int16_t curL_phaA = 0, curL_phaB = 0, curL_DC = 0;
 int16_t curR_phaB = 0, curR_phaC = 0, curR_DC = 0;
@@ -90,7 +85,8 @@ static int16_t offsetdcr    = 2000;
 
 int16_t        batVoltage       = (400 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE;
 static int32_t batVoltageFixdt  = (400 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE << 16;  // Fixed-point filter output initialized at 400 V*100/cell = 4 V/cell converted to fixed-point
-
+int32_t simulated_aligned_count = 0; // For encoder simulation during alignment
+int32_t simulated_mech_angle_deg = 0; // For encoder simulation during alignment
 // =================================
 // DMA interrupt frequency =~ 16 kHz
 // =================================
@@ -181,12 +177,10 @@ void DMA1_Channel1_IRQHandler(void) {
  
   // ========================= LEFT MOTOR ============================ 
     // Get hall sensors values
-   
-    #ifndef ENCODER
     uint8_t hall_ul = !(LEFT_HALL_U_PORT->IDR & LEFT_HALL_U_PIN);
     uint8_t hall_vl = !(LEFT_HALL_V_PORT->IDR & LEFT_HALL_V_PIN);
     uint8_t hall_wl = !(LEFT_HALL_W_PORT->IDR & LEFT_HALL_W_PIN);
-    #endif
+    
     /* Set motor inputs here */
     rtU_Left.b_motEna     = enableFin;
     rtU_Left.z_ctrlModReq = ctrlModReq;  
@@ -202,8 +196,8 @@ void DMA1_Channel1_IRQHandler(void) {
       rtU_Left.r_inpTgt = pwml;
     } else {
       rtU_Left.r_inpTgt = encoder.align_inpTgt;
-      int32_t simulated_aligned_count = (encoder.simulated_mech_count % (int32_t)ENCODER_CPR + (int32_t)ENCODER_CPR) % (int32_t)ENCODER_CPR;
-      int32_t simulated_mech_angle_deg = (simulated_aligned_count * 3600) / (int32_t)ENCODER_CPR;
+       simulated_aligned_count = ((encoder.simulated_mech_count) % (int32_t)ENCODER_CPR + (int32_t)ENCODER_CPR) % (int32_t)ENCODER_CPR;
+       simulated_mech_angle_deg = (simulated_aligned_count * 3600) / (int32_t)ENCODER_CPR;
       rtU_Left.a_mechAngle = (int16_t)((simulated_mech_angle_deg * 16) / 10);
     }
     if (encoder.ali){
