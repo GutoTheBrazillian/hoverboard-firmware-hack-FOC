@@ -58,10 +58,8 @@ extern uint8_t buzzerCount;             // global variable for the buzzer counts
 extern volatile uint32_t buzzerTimer;   // global timer variable for buzzer timing
 
 #if defined(ANALOG_BUTTON)
-extern ADC_HandleTypeDef hadc1;
-
-volatile uint8_t analogButtonPressed = 0;
-static volatile uint8_t analogButtonAwaitPress = 1;
+volatile uint8_t analogButtonPressed = 0U;
+static uint8_t analogButtonLatched = 0U;
 
 #if ANALOG_BUTTON_PRESSED_MIN > 4095U
   #error "ANALOG_BUTTON_PRESSED_MIN must be <= 4095"
@@ -73,64 +71,86 @@ static volatile uint8_t analogButtonAwaitPress = 1;
   #error "ANALOG_BUTTON_RELEASE_MAX must be less than ANALOG_BUTTON_PRESSED_MIN"
 #endif
 
-// Arm watchdog so a rising sample trips when the button crosses the press threshold.
-static void AnalogButton_ArmPress(void) {
-  ADC_AnalogWDGConfTypeDef config;
-  config.WatchdogMode = ADC_ANALOGWATCHDOG_SINGLE_REG;
-  config.HighThreshold = ANALOG_BUTTON_PRESSED_MIN;
-  config.LowThreshold  = 0U;
-  config.Channel       = BUTTON_ADC_CHANNEL;
-  config.ITMode        = ENABLE;
-  HAL_ADC_AnalogWDGConfig(&hadc1, &config);
-}
-
-// Arm watchdog so a falling sample trips when the button drops below the release threshold.
-static void AnalogButton_ArmRelease(void) {
-  ADC_AnalogWDGConfTypeDef config;
-  config.WatchdogMode = ADC_ANALOGWATCHDOG_SINGLE_REG;
-  config.HighThreshold = 0x0FFFU;
-  config.LowThreshold  = ANALOG_BUTTON_RELEASE_MAX;
-  config.Channel       = BUTTON_ADC_CHANNEL;
-  config.ITMode        = ENABLE;
-  HAL_ADC_AnalogWDGConfig(&hadc1, &config);
-}
-
-// Reset latched state and prime the watchdog before conversions start.
-void AnalogButton_Init(void) {
-  analogButtonPressed     = 0U;
-  analogButtonAwaitPress  = 1U;
-  __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_AWD);
-  AnalogButton_ArmPress();
-}
-
-// ISR context: latch the new state and re-arm the window for the next edge.
-void AnalogButton_HandleWatchdog(void) {
-  __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_AWD);
-  uint16_t sample = adc_buffer.adc12.value.button;
-
-  if (analogButtonAwaitPress) {
+static void AnalogButton_ProcessSample(uint16_t sample) {
+  if (!analogButtonLatched) {
     if (sample >= ANALOG_BUTTON_PRESSED_MIN) {
-      analogButtonPressed    = 1U;
-      analogButtonAwaitPress = 0U;
-      AnalogButton_ArmRelease();
-    } else {
-      AnalogButton_ArmPress();
+      analogButtonLatched  = 1U;
+      analogButtonPressed  = 1U;
     }
   } else {
     if (sample <= ANALOG_BUTTON_RELEASE_MAX) {
-      analogButtonPressed    = 0U;
-      analogButtonAwaitPress = 1U;
-      AnalogButton_ArmPress();
-    } else {
-      AnalogButton_ArmRelease();
+      analogButtonLatched  = 0U;
+      analogButtonPressed  = 0U;
     }
   }
 }
 
-// HAL hook invoked from ADC1_2 IRQ; only handle events sourced by the button channel.
+void AnalogButton_Init(void) {
+  analogButtonPressed = 0U;
+  analogButtonLatched = 0U;
+}
+#endif
+
+#if defined(DC_LINK_WATCHDOG_ENABLE)
+extern ADC_HandleTypeDef hadc3;
+
+static volatile uint8_t dcLinkOverVoltage = 0U;
+
+static void DcLinkWatchdog_ArmRise(void) {
+  ADC_AnalogWDGConfTypeDef config;
+  config.WatchdogMode = ADC_ANALOGWATCHDOG_SINGLE_REG;
+  config.HighThreshold = DC_LINK_OVERVOLTAGE_HIGH_COUNTS;
+  config.LowThreshold  = DC_LINK_OVERVOLTAGE_LOW_COUNTS;
+  config.Channel       = DCLINK_ADC_CHANNEL;
+  config.ITMode        = ENABLE;
+  HAL_ADC_AnalogWDGConfig(&hadc3, &config);
+}
+
+static void DcLinkWatchdog_ArmRecovery(void) {
+  ADC_AnalogWDGConfTypeDef config;
+  config.WatchdogMode = ADC_ANALOGWATCHDOG_SINGLE_REG;
+  config.HighThreshold = 0x0FFFU;
+  config.LowThreshold  = DC_LINK_OVERVOLTAGE_LOW_COUNTS;
+  config.Channel       = DCLINK_ADC_CHANNEL;
+  config.ITMode        = ENABLE;
+  HAL_ADC_AnalogWDGConfig(&hadc3, &config);
+}
+
+static void DcLinkWatchdog_HandleWatchdog(void) {
+  __HAL_ADC_CLEAR_FLAG(&hadc3, ADC_FLAG_AWD);
+
+  uint16_t sample = adc_buffer.adc3.value.batt1;
+
+  if (!dcLinkOverVoltage) {
+    if (sample >= DC_LINK_OVERVOLTAGE_HIGH_COUNTS) {
+      dcLinkOverVoltage = 1U;
+      DcLinkWatchdog_ArmRecovery();
+    } else {
+      DcLinkWatchdog_ArmRise();
+    }
+  } else {
+    if (sample <= DC_LINK_OVERVOLTAGE_LOW_COUNTS) {
+      dcLinkOverVoltage = 0U;
+      DcLinkWatchdog_ArmRise();
+    } else {
+      DcLinkWatchdog_ArmRecovery();
+    }
+  }
+}
+
+void DcLinkWatchdog_Init(void) {
+  dcLinkOverVoltage = 0U;
+  __HAL_ADC_CLEAR_FLAG(&hadc3, ADC_FLAG_AWD);
+  DcLinkWatchdog_ArmRise();
+}
+
+uint8_t DcLinkOverVoltageActive(void) {
+  return dcLinkOverVoltage;
+}
+
 void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *hadc) {
-  if ((hadc != NULL) && (hadc == &hadc1 || hadc->Instance == hadc1.Instance)) {
-    AnalogButton_HandleWatchdog();
+  if ((hadc != NULL) && (hadc == &hadc3 || hadc->Instance == hadc3.Instance)) {
+    DcLinkWatchdog_HandleWatchdog();
   }
 }
 #endif
@@ -138,6 +158,7 @@ void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *hadc) {
 // Shared accessor used by the rest of the firmware regardless of button mode.
 uint8_t powerButtonPressed(void) {
 #if defined(ANALOG_BUTTON)
+  AnalogButton_ProcessSample(adc_buffer.adc3.value.button);
   return analogButtonPressed;
 #else
   return HAL_GPIO_ReadPin(BUTTON_PORT, BUTTON_PIN);
@@ -1225,7 +1246,7 @@ void adcCalibLim(void) {
 #endif  // AUTO_CALIBRATION_ENA
 }
  /*
- * Update Maximum Motor Current Limit (via ADC1) and Maximum Speed Limit (via ADC2)
+ * Update Maximum Motor Current Limit (via ADC3) and Maximum Speed Limit (via ADC3)
  * Procedure:
  * - press the power button for more than 5 sec and immediatelly after the beep sound press one more time shortly
  * - move and hold the pots to a desired limit position for Current and Speed
@@ -1258,8 +1279,8 @@ void updateCurSpdLim(void) {
     HAL_Delay(5);
   }
   // Calculate scaling factors
-  cur_factor = CLAMP((input1_fixdt - (input1[inIdx].min << 16)) / (input1[inIdx].max - input1[inIdx].min), 6553, 65535);    // ADC1, MIN_cur(10%) = 1.5 A 
-  spd_factor = CLAMP((input2_fixdt - (input2[inIdx].min << 16)) / (input2[inIdx].max - input2[inIdx].min), 3276, 65535);    // ADC2, MIN_spd(5%)  = 50 rpm
+  cur_factor = CLAMP((input1_fixdt - (input1[inIdx].min << 16)) / (input1[inIdx].max - input1[inIdx].min), 6553, 65535);    // ADC3, MIN_cur(10%) = 1.5 A 
+  spd_factor = CLAMP((input2_fixdt - (input2[inIdx].min << 16)) / (input2[inIdx].max - input2[inIdx].min), 3276, 65535);    // ADC3, MIN_spd(5%)  = 50 rpm
       
   if (input1[inIdx].typ != 0){
     // Update current limit

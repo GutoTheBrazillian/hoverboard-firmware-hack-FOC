@@ -50,8 +50,8 @@ extern DMA_HandleTypeDef hdma_usart3_tx;
 /* USER CODE BEGIN 0 */
 extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart3;
-#if defined(ANALOG_BUTTON)
-extern ADC_HandleTypeDef hadc1;
+#if defined(DC_LINK_WATCHDOG_ENABLE)
+extern ADC_HandleTypeDef hadc3;
 #endif
 /* USER CODE END 0 */
 
@@ -408,11 +408,11 @@ void USART3_IRQHandler(void)
 /* please refer to the startup file (startup_stm32f1xx.s).                    */
 /******************************************************************************/
 
-#if defined(ANALOG_BUTTON)
-void ADC1_2_IRQHandler(void)
+#if defined(DC_LINK_WATCHDOG_ENABLE)
+void ADC3_IRQHandler(void)
 {
-  /* Forward analog watchdog events into the HAL so the util.c callback can run. */
-  HAL_ADC_IRQHandler(&hadc1);
+  /* Forward analog watchdog events into the HAL so the DC-link handler can run. */
+  HAL_ADC_IRQHandler(&hadc3);
 }
 #endif
 

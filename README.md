@@ -158,3 +158,16 @@ If you want to donate to keep this firmware updated, please use the link below:
 [![paypal](https://www.paypalobjects.com/en_US/NL/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=CU2SWN2XV9SCY&currency_code=EUR&source=url)
 
 ---
+
+## Recent changes (local branch)
+
+This branch contains several safety and ADC housekeeping improvements:
+
+- Centralized DC-link analog watchdog on ADC3 with hysteresis and IRQ-based handling.
+- Added a fast startup undervoltage check (raw ADC) and an optional hard 18.00 V startup cutoff to prevent booting on very low packs.
+- Main-loop now checks raw VBAT ADC samples for fast runtime shutdown in addition to the slower filtered battery voltage.
+- Replaced analog-button analog-watchdog with software hysteresis for more predictable button handling.
+- Added guards and corrected ADC3 DMA/IRQ initialization ordering so watchdog and DMA are configured after ADC is enabled.
+
+These changes improve safety (faster undervoltage shutdown), maintainability (centralized watchdog), and usability (more reliable analog button input).
+

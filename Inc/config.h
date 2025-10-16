@@ -75,7 +75,7 @@
  * Write debug output value nr 5 to BAT_CALIB_ADC. make and flash firmware.
  * Then you can verify voltage on debug output value 6 (to get calibrated voltage multiplied by 100).
 */
-#define BAT_FILT_COEF           655       // battery voltage filter coefficient in fixed-point. coef_fixedPoint = coef_floatingPoint * 2^16. In this case 655 = 0.01 * 2^16
+#define BAT_FILT_COEF           6553       // battery voltage filter coefficient in fixed-point. coef_fixedPoint = coef_floatingPoint * 2^16. In this case 655 = 0.01 * 2^16
 #define BAT_CALIB_REAL_VOLTAGE  3970      // input voltage measured by multimeter (multiplied by 100). In this case 43.00 V * 100 = 4300
 #define BAT_CALIB_ADC           1492      // adc-value measured by mainboard (value nr 5 on UART debug output)
 #define BAT_CELLS               6        // battery number of cells. Normal Hoverboard battery: 10s
@@ -88,7 +88,9 @@
 #define BAT_LVL3                (370 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // Yellow blink: no beep 
 #define BAT_LVL2                (360 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // Red:          gently beep at this voltage level. [V*100/cell]. In this case 3.60 V/cell
 #define BAT_LVL1                (350 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // Red blink:    fast beep. Your battery is almost empty. Charge now! [V*100/cell]. In this case 3.50 V/cell
-#define BAT_DEAD                (337 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // All leds off: undervoltage poweroff. (while not driving) [V*100/cell]. In this case 3.37 V/cell
+#define BAT_DEAD                (330 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // All leds off: undervoltage poweroff. (while not driving) [V*100/cell]. In this case 3.37 V/cell
+#define HARD_LIM                 1800  //hard 18v lower limit to prevent damage to driver
+#define HARD_18V_COUNTS (((HARD_LIM) * BAT_CALIB_ADC + (BAT_CALIB_REAL_VOLTAGE / 2U)) / (BAT_CALIB_REAL_VOLTAGE))
 // ######################## END OF BATTERY ###############################
 
 
@@ -102,6 +104,8 @@
  * Write debug output value 8 to TEMP_CAL_LOW_ADC. drive around to warm up the board. it should be at least 20°C warmer. repeat it for the HIGH-values.
  * Enable warning and/or poweroff and make and flash firmware.
 */
+// Comment out ENABLE_BOARD_TEMP_SENSOR to skip measuring the MCU temperature sensor.
+//define ENABLE_BOARD_TEMP_SENSOR
 #define TEMP_FILT_COEF          655       // temperature filter coefficient in fixed-point. coefFixedPoint = coef_floatingPoint * 2^16. In this case 655 = 0.01 * 2^16
 #define TEMP_CAL_LOW_ADC        1655      // temperature 1: ADC value
 #define TEMP_CAL_LOW_DEG_C      358       // temperature 1: measured temperature [°C * 10]. Here 35.8 °C
@@ -112,6 +116,30 @@
 #define TEMP_POWEROFF_ENABLE    0         // to poweroff or not to poweroff, 1 or 0, DO NOT ACTIVITE WITHOUT CALIBRATION!
 #define TEMP_POWEROFF           650       // overheat poweroff. (while not driving) [°C * 10]. Here 65.0 °C
 // ######################## END OF TEMPERATURE ###############################
+
+
+// ############################### DC LINK WATCHDOG ###############################
+// Configure the analog watchdog limits used to drive the brake resistor logic.
+// Express thresholds in V*100 (same unit as BAT_CALIB_REAL_VOLTAGE).
+#define DC_LINK_WATCHDOG_ENABLE
+#if defined(DC_LINK_WATCHDOG_ENABLE)
+  #define DC_LINK_OVERVOLTAGE_HIGH_X100   (BAT_CALIB_REAL_VOLTAGE + 300U)  // e.g. +5 V
+  #define DC_LINK_OVERVOLTAGE_LOW_X100    (BAT_CALIB_REAL_VOLTAGE + 100U)  // e.g. +1 V
+
+  #define DC_LINK_ADC_COUNTS_FROM_X100(vx100) \
+    (((vx100) * BAT_CALIB_ADC + (BAT_CALIB_REAL_VOLTAGE / 2U)) / BAT_CALIB_REAL_VOLTAGE)
+
+  #define DC_LINK_OVERVOLTAGE_HIGH_COUNTS  DC_LINK_ADC_COUNTS_FROM_X100(DC_LINK_OVERVOLTAGE_HIGH_X100)
+  #define DC_LINK_OVERVOLTAGE_LOW_COUNTS   DC_LINK_ADC_COUNTS_FROM_X100(DC_LINK_OVERVOLTAGE_LOW_X100)
+
+  #if DC_LINK_OVERVOLTAGE_HIGH_COUNTS > 4095
+    #error "DC_LINK_OVERVOLTAGE_HIGH_X100 maps beyond 12-bit ADC range"
+  #endif
+  #if DC_LINK_OVERVOLTAGE_LOW_COUNTS >= DC_LINK_OVERVOLTAGE_HIGH_COUNTS
+    #error "DC_LINK_OVERVOLTAGE_LOW_X100 must map below the overvoltage high threshold"
+  #endif
+#endif
+// ######################## END OF DC LINK WATCHDOG ###############################
 
 
 
@@ -132,7 +160,7 @@
   Inputs:
    - input1[inIdx].cmd and input2[inIdx].cmd: normalized input values. INPUT_MIN to INPUT_MAX
    - button1 and button2: digital input values. 0 or 1
-   - adc_buffer.adc12.value.l_tx2 and adc_buffer.adc12.value.l_rx2: unfiltered ADC values (you do not need them). 0 to 4095
+   - adc_buffer.adc3.value.l_tx2 and adc_buffer.adc3.value.l_rx2: unfiltered ADC values (you do not need them). 0 to 4095
    Outputs:
     - cmdL and cmdR: normal driving INPUT_MIN to INPUT_MAX
 */
@@ -170,7 +198,7 @@
 //#define BEEPER_OFF
 //#define ENCODER_X
 //#define ENCODER_Y                         // 
-#define ANALOG_BUTTON                     // Monitor BUTTON_PIN with ADC1 analog watchdog
+#define ANALOG_BUTTON                     // ANALOG BUTTON_PIN supports greater range of voltage levels.
 #if defined(ANALOG_BUTTON)
   #define POWER_BUTTON_ADC_FULL_SCALE        4096U   // 12-bit ADC
   #define POWER_BUTTON_ADC_REFERENCE_MV      3300U   // ADC reference voltage in millivolts
@@ -189,7 +217,6 @@
   #define ANALOG_BUTTON_PRESSED_MIN    POWER_BUTTON_ADC_COUNTS_FROM_MV(POWER_BUTTON_THRESHOLD_MV)
   #define ANALOG_BUTTON_RELEASE_MAX    POWER_BUTTON_ADC_COUNTS_FROM_MV((POWER_BUTTON_THRESHOLD_MV) - (POWER_BUTTON_RELEASE_MARGIN_MV))
 #endif
-//#define ADC3_RIGHT_POTENTIOMETERS            // Sample the right sensor board analog inputs (PB0/PB1) with ADC3
 //#define HOCP                            // Tie PA6/PB12 hardware over-current signals into TIM1/TIM8 break inputs
 // #define STANDSTILL_HOLD_ENABLE          // [-] Flag to hold the position when standtill is reached. Only available and makes sense for VOLTAGE or TORQUE mode.
 // #define ELECTRIC_BRAKE_ENABLE           // [-] Flag to enable electric brake and replace the motor "freewheel" with a constant braking when the input torque request is 0. Only available and makes sense for TORQUE mode.
@@ -226,9 +253,9 @@
 /* ***_INPUT: TYPE, MIN, MID, MAX, DEADBAND
  * -----------------------------------------
  * TYPE:      0:Disabled, 1:Normal Pot, 2:Middle Resting Pot, 3:Auto-detect
- * MIN:       min ADC1-value while poti at minimum-position (0 - 4095)
- * MID:       mid ADC1-value while poti at mid-position (INPUT_MIN - INPUT_MAX)
- * MAX:       max ADC2-value while poti at maximum-position (0 - 4095)
+ * MIN:       min ADC3-value while poti at minimum-position (0 - 4095)
+ * MID:       mid ADC3-value while poti at mid-position (INPUT_MIN - INPUT_MAX)
+ * MAX:       max ADC3-value while poti at maximum-position (0 - 4095)
  * DEADBAND:  how much of the center position is considered 'center' (100 = values -100 to 100 are considered 0)
  * 
  * Dual-inputs
@@ -265,11 +292,11 @@
  * DEBUG ASCII output is:
  * // "in1:345 in2:1337 cmdL:0 cmdR:0 BatADC:0 BatV:0 TempADC:0 Temp:0\r\n"
  *
- * in1:     (int16_t)input1[inIdx].raw);                                        raw input1: ADC1, UART, PWM, PPM, iBUS
- * in2:     (int16_t)input2[inIdx].raw);                                        raw input2: ADC2, UART, PWM, PPM, iBUS
+ * in1:     (int16_t)input1[inIdx].raw);                                        raw input1: ADC3, UART, PWM, PPM, iBUS
+ * in2:     (int16_t)input2[inIdx].raw);                                        raw input2: ADC3, UART, PWM, PPM, iBUS
  * cmdL:    (int16_t)cmdL);                                                     output command Left: [-1000, 1000]
  * cmdR:    (int16_t)cmdR);                                                     output command Right: [-1000, 1000]
- * BatADC:  (int16_t)adc_buffer.adc12.value.batt1);                             Battery adc-value measured by mainboard
+ * BatADC:  (int16_t)adc_buffer.adc3.value.batt1);                             Battery adc-value measured by mainboard
  * BatV:    (int16_t)(batVoltage * BAT_CALIB_REAL_VOLTAGE / BAT_CALIB_ADC));    Battery calibrated voltage multiplied by 100 for verifying battery voltage calibration
  * TempADC: (int16_t)board_temp_adcFilt);                                       for board temperature calibration
  * Temp:    (int16_t)board_temp_deg_c);                                         Temperature in celcius for verifying board temperature calibration
@@ -941,5 +968,5 @@
 #endif
 // ############################# END OF VALIDATE SETTINGS ############################
 
-#endif
+#endif // CONFIG_H
 

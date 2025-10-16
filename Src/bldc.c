@@ -114,7 +114,7 @@ void DMA1_Channel1_IRQHandler(void) {
   }
 
   if (buzzerTimer % 1000 == 0) {  // Filter battery voltage at a slower sampling rate
-  filtLowPass32(adc_buffer.adc12.value.batt1, BAT_FILT_COEF, &batVoltageFixdt);
+  filtLowPass32(adc_buffer.adc3.value.batt1, BAT_FILT_COEF, &batVoltageFixdt);
     batVoltage = (int16_t)(batVoltageFixdt >> 16);  // convert fixed-point to integer
   }
 

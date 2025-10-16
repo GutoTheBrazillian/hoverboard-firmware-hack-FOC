@@ -100,29 +100,6 @@
 #define RIGHT_U_CUR_PORT GPIOC
 #define RIGHT_V_CUR_PORT GPIOC
 
-#if defined(ADC3_RIGHT_POTENTIOMETERS)
-#define ADC3_TRIPLE_MODE 1
-#else
-#define ADC3_TRIPLE_MODE 0
-#endif
-
-#if defined(ANALOG_BUTTON)
-#define ADC12_DMA_WORD_COUNT 6U
-#else
-#define ADC12_DMA_WORD_COUNT 5U
-#endif
-
-#if ADC3_TRIPLE_MODE
-#define ADC3_CONVERSION_COUNT 2U
-#define RIGHT_TX_ADC_PIN        GPIO_PIN_0
-#define RIGHT_TX_ADC_PORT       GPIOB
-#define RIGHT_RX_ADC_PIN        GPIO_PIN_1
-#define RIGHT_RX_ADC_PORT       GPIOB
-#define RIGHT_TX_ADC_CHANNEL    ADC_CHANNEL_8
-#define RIGHT_RX_ADC_CHANNEL    ADC_CHANNEL_9
-#else
-#define ADC3_CONVERSION_COUNT 0U
-#endif
 // #define DCLINK_ADC ADC3
 // #define DCLINK_CHANNEL
 #ifdef ENCODER_Y
@@ -146,9 +123,11 @@
 #if BOARD_VARIANT == 0
 #define DCLINK_PIN GPIO_PIN_2
 #define DCLINK_PORT GPIOC
+#define DCLINK_ADC_CHANNEL ADC_CHANNEL_12
 #elif BOARD_VARIANT == 1
 #define DCLINK_PIN GPIO_PIN_1
 #define DCLINK_PORT GPIOA
+#define DCLINK_ADC_CHANNEL ADC_CHANNEL_1
 #endif
 
 // #define DCLINK_PULLUP 30000
@@ -185,9 +164,6 @@
 #define BUTTON_PORT GPIOB
 #endif
 #if defined(ANALOG_BUTTON)
-  #if BOARD_VARIANT != 0
-    #error "ANALOG_BUTTON is only supported on BOARD_VARIANT 0"
-  #endif
   #define BUTTON_ADC_CHANNEL        ADC_CHANNEL_1
 #endif
 
@@ -287,48 +263,51 @@
 
 
 
-typedef struct {
+typedef struct { // Structure for ADC1 and ADC2 values
   uint16_t dcr;
   uint16_t dcl;
   uint16_t rlA;
   uint16_t rlB;
   uint16_t rrB;
   uint16_t rrC;
-  uint16_t batt1;
-  uint16_t l_tx2;
+  #if defined(ENABLE_BOARD_TEMP_SENSOR)
   uint16_t temp;
-  uint16_t l_rx2;
-#if defined(ANALOG_BUTTON)
-  uint16_t button;
-  uint16_t button_aux;
-#endif
-} adc12_named_samples_t;
+  #endif
 
+} adc12_named_samples_t;
+#ifndef ENABLE_BOARD_TEMP_SENSOR
+#define ADC12_CONV_COUNT 3
+#else
+#define ADC12_CONV_COUNT 4
+#endif  
 typedef union {
   adc12_named_samples_t value;
-  uint32_t raw[ADC12_DMA_WORD_COUNT];
+  uint32_t raw[ADC12_CONV_COUNT];
 } adc12_dma_buffer_t;
 
-#if ADC3_CONVERSION_COUNT > 0
-#if ADC3_CONVERSION_COUNT != 2
-#error "ADC3_CONVERSION_COUNT must equal 2 to match adc3_named_samples_t layout"
+typedef struct {  // Structure for ADC3 values
+  #if defined(ANALOG_BUTTON)
+  uint16_t button;
 #endif
-typedef struct {
   uint16_t r_tx2;
   uint16_t r_rx2;
+  uint16_t batt1;
 } adc3_named_samples_t;
+#ifndef ANALOG_BUTTON
+ #define ADC3_CONV_COUNT 3 
+#else
+ #define ADC3_CONV_COUNT 4
+#endif
 
 typedef union {
   adc3_named_samples_t value;
-  uint16_t raw[ADC3_CONVERSION_COUNT];
+  uint16_t raw[ADC3_CONV_COUNT]; 
 } adc3_dma_buffer_t;
-#endif
+
 
 typedef struct {
   adc12_dma_buffer_t adc12;
-#if ADC3_CONVERSION_COUNT > 0
   adc3_dma_buffer_t adc3;
-#endif
 } adc_buf_t;
 
 typedef enum {

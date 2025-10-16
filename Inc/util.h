@@ -155,7 +155,11 @@ uint8_t powerButtonPressed(void);
 
 #if defined(ANALOG_BUTTON)
 void AnalogButton_Init(void);
-void AnalogButton_HandleWatchdog(void);
+#endif
+
+#if defined(DC_LINK_WATCHDOG_ENABLE)
+void DcLinkWatchdog_Init(void);
+uint8_t DcLinkOverVoltageActive(void);
 #endif
 
 // Filtering Functions

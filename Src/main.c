@@ -57,9 +57,8 @@ extern TIM_HandleTypeDef htim_left;
 extern TIM_HandleTypeDef htim_right;
 extern ADC_HandleTypeDef hadc1;
 extern ADC_HandleTypeDef hadc2;
-#if ADC3_CONVERSION_COUNT > 0
 extern ADC_HandleTypeDef hadc3;
-#endif
+
 extern volatile adc_buf_t adc_buffer;
 #if defined(DEBUG_I2C_LCD) || defined(SUPPORT_LCD)
   extern LCD_PCF8574_HandleTypeDef lcd;
@@ -231,15 +230,32 @@ int main(void) {
 
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
-#if ADC3_CONVERSION_COUNT > 0
   HAL_ADC_Start(&hadc3);
+
+#if defined(BAT_DEAD_ENABLE)
+  /* Allow a small time for the first ADC/DMA sample to arrive, then
+   * check battery voltage immediately to avoid long waits during
+   * wheel/encoder calibration when battery is already too low.
+   */
+  HAL_Delay(20);
+  /* If HARD_18V_ENABLE is enabled, compute the lower of BAT_DEAD and HARD_18V threshold
+   * and power off if the measured ADC count is below that value.
+   */
+  const int32_t hard_lower = (HARD_18V_COUNTS < (int32_t)BAT_DEAD) ? HARD_18V_COUNTS : (int32_t)BAT_DEAD;
+  if ((int32_t)adc_buffer.adc3.value.batt1 < hard_lower){
+    /* Immediately release power latch and stop initialization */
+    poweroff();
+  }
 #endif
+
 
   poweronMelody();
   HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
   
+#if defined(ENABLE_BOARD_TEMP_SENSOR)
   int32_t board_temp_adcFixdt = adc_buffer.adc12.value.temp << 16;  // Fixed-point filter output initialized with current ADC converted to fixed-point
   int16_t board_temp_adcFilt  = adc_buffer.adc12.value.temp;
+#endif
 
   #ifdef MULTI_MODE_DRIVE
   if (adc_buffer.adc12.value.l_tx2 > input1[0].min + 50 && adc_buffer.adc12.value.l_rx2 > input2[0].min + 50) {
@@ -528,11 +544,13 @@ int main(void) {
       sideboardLeds(&sideboard_leds_R);
     #endif
 
-   
+    
+#if defined(ENABLE_BOARD_TEMP_SENSOR)
     // ####### CALC BOARD TEMPERATURE #######
-  filtLowPass32(adc_buffer.adc12.value.temp, TEMP_FILT_COEF, &board_temp_adcFixdt);
+    filtLowPass32(adc_buffer.adc12.value.temp, TEMP_FILT_COEF, &board_temp_adcFixdt);
     board_temp_adcFilt  = (int16_t)(board_temp_adcFixdt >> 16);  // convert fixed-point to integer
     board_temp_deg_c    = (TEMP_CAL_HIGH_DEG_C - TEMP_CAL_LOW_DEG_C) * (board_temp_adcFilt - TEMP_CAL_LOW_ADC) / (TEMP_CAL_HIGH_ADC - TEMP_CAL_LOW_ADC) + TEMP_CAL_LOW_DEG_C;
+#endif
 
     // ####### CALC CALIBRATED BATTERY VOLTAGE #######
     batVoltageCalib = batVoltage * BAT_CALIB_REAL_VOLTAGE / BAT_CALIB_ADC;
@@ -553,15 +571,10 @@ int main(void) {
             input2[inIdx].raw,        // 2: INPUT2
             cmdL,                     // 3: output command: [-1000, 1000]
             cmdR,                     // 4: output command: [-1000, 1000]
-            adc_buffer.adc12.value.batt1,         // 5: for battery voltage calibration
+            adc_buffer.adc3.value.batt1,         // 5: for battery voltage calibration
             batVoltageCalib,          // 6: for verifying battery voltage calibration
             board_temp_adcFilt,       // 7: for board temperature calibration
             board_temp_deg_c);        // 8: for verifying board temperature calibration
-#if ADC3_CONVERSION_COUNT > 0
-          printf(" RightADC:%u,%u",
-            (unsigned)adc_buffer.adc3.value.r_tx2,
-            (unsigned)adc_buffer.adc3.value.r_rx2);
-#endif
           printf(" \r\n");
         #endif
       }
@@ -603,12 +616,15 @@ int main(void) {
     poweroffPressCheck();
 
     // ####### BEEP AND EMERGENCY POWEROFF #######
+#if defined(ENABLE_BOARD_TEMP_SENSOR)
     if (TEMP_POWEROFF_ENABLE && board_temp_deg_c >= TEMP_POWEROFF && speedAvgAbs < 20){  // poweroff before mainboard burns OR low bat 3
       #if defined(DEBUG_SERIAL_USART2) || defined(DEBUG_SERIAL_USART3)
         printf("Powering off, temperature is too high\r\n");
       #endif
       poweroff();
-    } else if ( BAT_DEAD_ENABLE && batVoltage < BAT_DEAD && speedAvgAbs < 20){
+    } else
+#endif
+    if ( BAT_DEAD_ENABLE && batVoltage < BAT_DEAD && speedAvgAbs < 20){
       #if defined(DEBUG_SERIAL_USART2) || defined(DEBUG_SERIAL_USART3)
         printf("Powering off, battery voltage is too low\r\n");
       #endif
@@ -622,8 +638,10 @@ int main(void) {
       beepCount(3, 24, 1);
     } else if (timeoutFlgGen) {                                                                       // 4 beeps (low pitch): General timeout (PPM, PWM, Nunchuk)
       beepCount(4, 24, 1);
+#if defined(ENABLE_BOARD_TEMP_SENSOR)
     } else if (TEMP_WARNING_ENABLE && board_temp_deg_c >= TEMP_WARNING) {                             // 5 beeps (low pitch): Mainboard temperature warning
       beepCount(5, 24, 1);
+#endif
     } else if (BAT_LVL1_ENABLE && batVoltage < BAT_LVL1) {                                            // 1 beep fast (medium pitch): Low bat 1
       beepCount(0, 10, 6);
     } else if (BAT_LVL2_ENABLE && batVoltage < BAT_LVL2) {                                            // 1 beep slow (medium pitch): Low bat 2

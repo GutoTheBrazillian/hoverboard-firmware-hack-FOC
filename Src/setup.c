@@ -44,9 +44,8 @@ TIM_HandleTypeDef htim_right;
 TIM_HandleTypeDef htim_left;
 ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
-#if ADC3_CONVERSION_COUNT > 0
 ADC_HandleTypeDef hadc3;
-#endif
+
 I2C_HandleTypeDef hi2c2;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
@@ -124,22 +123,6 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     /* USART2 clock enable */
     __HAL_RCC_USART2_CLK_ENABLE();
   
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    /**USART2 GPIO Configuration    
-    PA2     ------> USART2_TX
-    PA3     ------> USART2_RX 
-    */
-    GPIO_InitStruct.Pin = GPIO_PIN_2;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    GPIO_InitStruct.Pin = GPIO_PIN_3;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    /* USART2 DMA Init */
     /* USART2_RX Init */
     hdma_usart2_rx.Instance = DMA1_Channel6;
     hdma_usart2_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
@@ -454,11 +437,6 @@ void MX_GPIO_Init(void) {
   GPIO_InitStruct.Pin = RIGHT_V_CUR_PIN;
   HAL_GPIO_Init(RIGHT_V_CUR_PORT, &GPIO_InitStruct);
 
-#if ADC3_TRIPLE_MODE
-  GPIO_InitStruct.Pin = RIGHT_TX_ADC_PIN | RIGHT_RX_ADC_PIN;
-  HAL_GPIO_Init(RIGHT_TX_ADC_PORT, &GPIO_InitStruct);
-#endif
-
   GPIO_InitStruct.Pin = DCLINK_PIN;
   HAL_GPIO_Init(DCLINK_PORT, &GPIO_InitStruct);
 
@@ -645,11 +623,8 @@ void MX_ADC1_Init(void) {
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T8_TRGO;
   hadc1.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
-#if defined(ANALOG_BUTTON)
-  hadc1.Init.NbrOfConversion       = 6;
-#else
-  hadc1.Init.NbrOfConversion       = 5;
-#endif
+  hadc1.Init.NbrOfConversion       = ADC12_CONV_COUNT;
+
   HAL_ADC_Init(&hadc1);
   /**Enable or disable the remapping of ADC1_ETRGREG:
     * ADC1 External Event regular conversion is connected to TIM8 TRG0
@@ -676,35 +651,26 @@ void MX_ADC1_Init(void) {
   sConfig.Rank    = 3;
   HAL_ADC_ConfigChannel(&hadc1, &sConfig);
 
-  #if BOARD_VARIANT == 0
-  sConfig.Channel = ADC_CHANNEL_12;  // pc2 vbat
-  #elif BOARD_VARIANT == 1
-  sConfig.Channel = ADC_CHANNEL_1;   // pa1 vbat
-  #endif
-  sConfig.Rank    = 4;
-  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
-  //temperature requires at least 17.1uS sampling time
+#if defined(ENABLE_BOARD_TEMP_SENSOR)
+  // temperature requires at least 17.1us sampling time
   sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
   sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;  // internal temp
-  sConfig.Rank    = 5;
-  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
 
-#if defined(ANALOG_BUTTON)
-  sConfig.SamplingTime = ADC_SAMPLETIME_7CYCLES_5;
-  sConfig.Channel = BUTTON_ADC_CHANNEL;
-  sConfig.Rank    = 6;
+  sConfig.Rank    = 4;
   HAL_ADC_ConfigChannel(&hadc1, &sConfig);
 #endif
 
-  hadc1.Instance->CR2 |= ADC_CR2_DMA | ADC_CR2_TSVREFE;
+  hadc1.Instance->CR2 |= ADC_CR2_DMA;
+#if defined(ENABLE_BOARD_TEMP_SENSOR)
+  hadc1.Instance->CR2 |= ADC_CR2_TSVREFE;
+#endif
 
   __HAL_ADC_ENABLE(&hadc1);
 
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   DMA1_Channel1->CCR   = 0;
-  DMA1_Channel1->CNDTR = ADC12_DMA_WORD_COUNT;
+  DMA1_Channel1->CNDTR = 3;
   DMA1_Channel1->CPAR  = (uint32_t) & (ADC1->DR);
   DMA1_Channel1->CMAR  = (uint32_t)&adc_buffer.adc12.raw[0];
   DMA1_Channel1->CCR   = DMA_CCR_MSIZE_1 | DMA_CCR_PSIZE_1 | DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_TCIE;
@@ -712,12 +678,6 @@ void MX_ADC1_Init(void) {
 
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
-
-#if defined(ANALOG_BUTTON)
-  HAL_NVIC_SetPriority(ADC1_2_IRQn, 1, 0);
-  HAL_NVIC_EnableIRQ(ADC1_2_IRQn);
-  AnalogButton_Init();
-#endif
 }
 
 /* ADC2 init function */
@@ -736,14 +696,9 @@ void MX_ADC2_Init(void) {
   hadc2.Init.DiscontinuousConvMode = DISABLE;
   hadc2.Init.ExternalTrigConv      = ADC_SOFTWARE_START;
   hadc2.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
-#if defined(ANALOG_BUTTON)
-  hadc2.Init.NbrOfConversion       = 6;
-#else
-  hadc2.Init.NbrOfConversion       = 5;
-#endif
+  hadc2.Init.NbrOfConversion       = ADC12_CONV_COUNT;
   HAL_ADC_Init(&hadc2);
 
- 
   sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
   sConfig.Channel = ADC_CHANNEL_10;  // pc0 right cur   -> left
   sConfig.Rank    = 1;
@@ -759,64 +714,91 @@ void MX_ADC2_Init(void) {
   sConfig.Rank    = 3;
   HAL_ADC_ConfigChannel(&hadc2, &sConfig);
 
-  sConfig.Channel = ADC_CHANNEL_2;  // pa2 uart-l-tx
-  sConfig.Rank    = 4;
-  HAL_ADC_ConfigChannel(&hadc2, &sConfig);
-
-  // sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;   // Commented-out to make `uart-l-rx` ADC sample time the same as `uart-l-tx`
-  sConfig.Channel = ADC_CHANNEL_3;  // pa3 uart-l-rx
-  sConfig.Rank    = 5;
-  HAL_ADC_ConfigChannel(&hadc2, &sConfig);
-
-#if defined(ANALOG_BUTTON)
-  sConfig.Channel = BUTTON_ADC_CHANNEL;
-  sConfig.Rank    = 6;
-  HAL_ADC_ConfigChannel(&hadc2, &sConfig);
-#endif
-
-  hadc2.Instance->CR2 |= ADC_CR2_DMA;
-  __HAL_ADC_ENABLE(&hadc2);
+  hadc2.Instance->CR2 |= ADC_CR2_DMA; //Transfer enable DMA
+  __HAL_ADC_ENABLE(&hadc2); // Enable ADC2
 }
 
-#if ADC3_CONVERSION_COUNT > 0
 void MX_ADC3_Init(void) {
-  ADC_ChannelConfTypeDef sConfig;
+  ADC_ChannelConfTypeDef sConfig = {0};
 
   __HAL_RCC_ADC3_CLK_ENABLE();
 
   hadc3.Instance                   = ADC3;
-  hadc3.Init.ScanConvMode          = (ADC3_CONVERSION_COUNT > 1U) ? ADC_SCAN_ENABLE : ADC_SCAN_DISABLE;
-  hadc3.Init.ContinuousConvMode    = DISABLE;
+  hadc3.Init.ScanConvMode          = ADC_SCAN_ENABLE;
+  hadc3.Init.ContinuousConvMode    = ENABLE;
   hadc3.Init.DiscontinuousConvMode = DISABLE;
-  hadc3.Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T8_TRGO;
+  hadc3.Init.ExternalTrigConv      = ADC_SOFTWARE_START;
   hadc3.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
-  hadc3.Init.NbrOfConversion       = ADC3_CONVERSION_COUNT;
+  hadc3.Init.NbrOfConversion       = ADC3_CONV_COUNT;
   HAL_ADC_Init(&hadc3);
 
-  sConfig.SamplingTime = ADC_SAMPLETIME_7CYCLES_5;
-  sConfig.Channel      = RIGHT_TX_ADC_CHANNEL;
-  sConfig.Rank         = ADC_REGULAR_RANK_1;
+ 
+
+  #if defined(ANALOG_BUTTON)
+  sConfig.Channel = BUTTON_ADC_CHANNEL;
+  sConfig.Rank = 1;  //Power Button
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  HAL_ADC_ConfigChannel(&hadc3, &sConfig);
+  #endif
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_2;// pa2 uart-l-tx
+  sConfig.Rank = 2;// pa2 uart-l-tx
   HAL_ADC_ConfigChannel(&hadc3, &sConfig);
 
-  if (ADC3_CONVERSION_COUNT > 1U) {
-    sConfig.Rank    = ADC_REGULAR_RANK_2;
-    sConfig.Channel = RIGHT_RX_ADC_CHANNEL;
-    HAL_ADC_ConfigChannel(&hadc3, &sConfig);
-  }
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_3;// pa3 uart-l-rx
+  sConfig.Rank = 3;// pa3 uart-l-rx
+  HAL_ADC_ConfigChannel(&hadc3, &sConfig);
 
-  hadc3.Instance->CR2 |= ADC_CR2_DMA;
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = DCLINK_ADC_CHANNEL; //vbat
+  sConfig.Rank = 4;//vbat
+  HAL_ADC_ConfigChannel(&hadc3, &sConfig);
+
+ __HAL_ADC_ENABLE(&hadc3);  // Enable ADC3
+
+  #if defined(DC_LINK_WATCHDOG_ENABLE)
+     /* The actual analog watchdog thresholds and IT mode are configured
+   * inside DcLinkWatchdog_Init() so that runtime thresholds and
+   * hysteresis (arm/restore) logic are centralized in util.c.
+   * We still enable the IRQ here so the handler can be installed.
+   */
+  HAL_NVIC_SetPriority(ADC3_IRQn, 4, 0);
+  HAL_NVIC_EnableIRQ(ADC3_IRQn);
+    DcLinkWatchdog_Init();
+  #endif
+ 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////   DMA ZONE //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  hadc3.Instance->CR2 |= ADC_CR2_DMA; //transfer enable DMA
 
   __HAL_RCC_DMA2_CLK_ENABLE();
 
-  DMA2_Channel5->CCR  = 0;
-  DMA2_Channel5->CNDTR = ADC3_CONVERSION_COUNT;
-  DMA2_Channel5->CPAR  = (uint32_t)&(ADC3->DR);
-  DMA2_Channel5->CMAR  = (uint32_t)&adc_buffer.adc3.raw[0];
-  DMA2_Channel5->CCR   = DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_MINC | DMA_CCR_CIRC;
-  DMA2_Channel5->CCR  |= DMA_CCR_EN;
+  DMA2_Channel5->CCR  = 0;                                           // Disable channel & clear previous configuration
+  DMA2_Channel5->CNDTR = ADC3_CONV_COUNT;                                          // Set number of data items to transfer (N)
 
-  __HAL_ADC_ENABLE(&hadc3);
-}
-#else
-void MX_ADC3_Init(void) { }
+  DMA2_Channel5->CPAR  = (uint32_t)&(ADC3->DR);                      // Peripheral address: ADC3 data register (source)
+  DMA2_Channel5->CMAR  = (uint32_t)&adc_buffer.adc3.raw[0];          // Memory address: destination buffer (target)
+  /* Configure DMA channel:
+   * - Peripheral size = half-word (16-bit)
+   * - Memory   size = half-word (16-bit)
+   * - Memory increment enabled so subsequent samples write to successive buffer entries
+   * - Circular mode enabled so DMA restarts automatically after finishing transfers
+   */
+  DMA2_Channel5->CCR   = DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_MINC | DMA_CCR_CIRC;
+  DMA2_Channel5->CCR  |= DMA_CCR_EN;                                  // Enable channel to start transfers
+  //DMA2_Channel5->CCR |= DMA_CCR_TCIE;
+  //HAL_NVIC_SetPriority(DMA2_Channel4_5_IRQn, 3, 0);
+  //HAL_NVIC_EnableIRQ(DMA2_Channel4_5_IRQn);
+ 
+  #if defined(ANALOG_BUTTON)
+  AnalogButton_Init();
 #endif
+
+
+}
