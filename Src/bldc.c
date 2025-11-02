@@ -55,14 +55,13 @@ static int16_t pwm_margin;              /* This margin allows to have a window i
 
 extern uint8_t ctrlModReq;
 static int16_t curDC_max = (I_DC_MAX * A2BIT_CONV);
-
+int16_t I_BusR=0; // Right driver total current in x10 resolution
 
 int16_t curL_phaA = 0, curL_phaB = 0, curL_DC = 0;
 int16_t curR_phaB = 0, curR_phaC = 0, curR_DC = 0;
 
 volatile int pwml = 0;
 volatile int pwmr = 0;
-
 extern volatile adc_buf_t adc_buffer;
 
 uint8_t buzzerFreq          = 0;
@@ -89,9 +88,9 @@ static int16_t offsetrrC    = 2000;
 static int16_t offsetdcl    = 2000;
 static int16_t offsetdcr    = 2000;
 
+extern int16_t batVoltageCalib;
 int16_t        batVoltage       = (400 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE;
 static int32_t batVoltageFixdt  = (400 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE << 16;  // Fixed-point filter output initialized at 400 V*100/cell = 4 V/cell converted to fixed-point
-int32_t emulated_aligned_count = 0; // For encoder simulation during alignment
 int32_t emulated_mech_angle_deg = 0; // For encoder simulation during alignment
 // =================================
 // DMA interrupt frequency =~ 16 kHz
@@ -130,9 +129,8 @@ void DMA1_Channel1_IRQHandler(void) {
 
   // Disable PWM when current limit is reached (current chopping)
   // This is the Level 2 of current protection. The Level 1 should kick in first given by I_MOT_MAX
-#if defined(HOCP)
+#if defined(HOCP) //Disable motors as precaution if overcurrent or short detected through bkin input
   if (LEFT_TIM->SR & TIM_SR_BIF) {
-    LEFT_TIM->SR &= (uint16_t)~TIM_SR_BIF;
     enable = 0;
   }
 #endif
@@ -145,7 +143,6 @@ void DMA1_Channel1_IRQHandler(void) {
 
 #if defined(HOCP)
   if (RIGHT_TIM->SR & TIM_SR_BIF) {
-    RIGHT_TIM->SR &= (uint16_t)~TIM_SR_BIF;
     enable = 0;
   }
 #endif
@@ -190,8 +187,9 @@ void DMA1_Channel1_IRQHandler(void) {
   }
 
   // ############################### MOTOR CONTROL ###############################
-
+  #ifndef INTBRK_L_EN
   int ul, vl, wl;
+  #endif
   int ur, vr, wr;
   static boolean_T OverrunFlag = false;
 
@@ -202,7 +200,7 @@ void DMA1_Channel1_IRQHandler(void) {
   OverrunFlag = true;
 
   /* Make sure to stop BOTH motors in case of an error */
-  enableFin = enable && !rtY_Left.z_errCode && !rtY_Right.z_errCode && !encoder_alignment_faulted();
+  enableFin = enable && !rtY_Left.z_errCode && !rtY_Right.z_errCode && !encoder_alignment_faulted() && !overcurrent_fault() && !DLVPA();
  
   // ========================= LEFT MOTOR ============================ 
     // Get hall sensors values
@@ -230,23 +228,19 @@ void DMA1_Channel1_IRQHandler(void) {
       rtU_Left.r_inpTgt = pwml;
     } else {
       rtU_Left.r_inpTgt = encoder_y.align_inpTgt;
-       emulated_aligned_count = ((encoder_y.emulated_mech_count) % (int32_t)ENCODER_Y_CPR + (int32_t)ENCODER_Y_CPR) % (int32_t)ENCODER_Y_CPR;
-       emulated_mech_angle_deg = (emulated_aligned_count * 3600) / (int32_t)ENCODER_Y_CPR;
-      rtU_Left.a_mechAngle = (int16_t)((emulated_mech_angle_deg * 16) / 10);
+       rtU_Left.a_mechAngle = (encoder_y.emulated_mech_count * 23040) / (uint32_t)ENCODER_Y_CPR;
+       
     }
     if (encoder_y.ali){
      encoder_y.aligned_count = encoder_y_handle.Instance->CNT;
     if (encoder_y.direction == 0) {
         encoder_y.aligned_count = -encoder_y.aligned_count;
     }
-    encoder_y.aligned_count = (encoder_y.aligned_count % (int32_t)ENCODER_Y_CPR + (int32_t)ENCODER_Y_CPR) % (int32_t)ENCODER_Y_CPR;
-    encoder_y.mech_angle_deg = (encoder_y.aligned_count * 3600) / (int32_t)ENCODER_Y_CPR;
+    rtU_Left.a_mechAngle = (encoder_y.aligned_count * 23040) / (uint32_t)ENCODER_Y_CPR;
     // Angle input in DEGREES [0,360] in fixdt(1,16,4) data type. If `angle` is float use `= (int16_t)floor(angle * 16.0F)` If `angle` is integer use `= (int16_t)(angle << 4)`
-    rtU_Left.a_mechAngle   = (int16_t)((encoder_y.mech_angle_deg * 16) / 10); 
     } 
     #else
     rtU_Left.r_inpTgt = pwml;
-    //rtU_Left.a_mechAngle   = 0;
     #endif
     
     /* Step the controller */
@@ -254,6 +248,8 @@ void DMA1_Channel1_IRQHandler(void) {
     BLDC_controller_step(rtM_Left);
     #endif
 
+
+    #ifndef INTBRK_L_EN
     /* Get motor outputs here */
     ul            = rtY_Left.DC_phaA;
     vl            = rtY_Left.DC_phaB;
@@ -263,9 +259,21 @@ void DMA1_Channel1_IRQHandler(void) {
   // motAngleLeft = rtY_Left.a_elecAngle;
 
     /* Apply commands */
+    
     LEFT_TIM->LEFT_TIM_U    = (uint16_t)CLAMP(ul + pwm_res / 2, pwm_margin, pwm_res-pwm_margin);
     LEFT_TIM->LEFT_TIM_V    = (uint16_t)CLAMP(vl + pwm_res / 2, pwm_margin, pwm_res-pwm_margin);
     LEFT_TIM->LEFT_TIM_W    = (uint16_t)CLAMP(wl + pwm_res / 2, pwm_margin, pwm_res-pwm_margin);
+    #else
+     
+    if (curR_DC > BRKRESACT_SENS) { // If over max regen current, apply braking on left motor
+      curR_DC -= MAX_REGEN_CURRENT;
+      I_BusR = CLAMP(((((int32_t)curR_DC * BRAKE_RESISTANCE * pwm_res) /(50*batVoltageCalib))) ,0, (((uint32_t)pwm_res*90)/100));
+     LEFT_TIM->LEFT_TIM_U = I_BusR;
+    }else{
+      LEFT_TIM->LEFT_TIM_U = 0;
+    }
+     
+    #endif
   // =================================================================
   
 
@@ -297,9 +305,8 @@ void DMA1_Channel1_IRQHandler(void) {
       rtU_Right.r_inpTgt = pwmr;
     } else {
       rtU_Right.r_inpTgt = encoder_x.align_inpTgt;
-       emulated_aligned_count = ((encoder_x.emulated_mech_count) % (int32_t)ENCODER_X_CPR + (int32_t)ENCODER_X_CPR) % (int32_t)ENCODER_X_CPR;
-       emulated_mech_angle_deg = (encoder_x.emulated_mech_count * 3600) / (int32_t)ENCODER_X_CPR;
-      rtU_Right.a_mechAngle = (int16_t)((emulated_mech_angle_deg * 16) / 10);
+       emulated_mech_angle_deg = (encoder_x.emulated_mech_count * 23040) / (uint32_t)ENCODER_X_CPR;
+      rtU_Right.a_mechAngle = emulated_mech_angle_deg;
     }
     if (encoder_x.ali){
        
@@ -308,14 +315,10 @@ void DMA1_Channel1_IRQHandler(void) {
     }else {
       encoder_x.aligned_count = ENCODER_X_CPR - encoder_x_handle.Instance->CNT;
     }
-    
-    encoder_x.mech_angle_deg = (encoder_x.aligned_count * 3600) / (int32_t)ENCODER_X_CPR;
-    // Angle input in DEGREES [0,360] in fixdt(1,16,4) data type. If `angle` is float use `= (int16_t)floor(angle * 16.0F)` If `angle` is integer use `= (int16_t)(angle << 4)`
-    rtU_Right.a_mechAngle   = (int16_t)((encoder_x.mech_angle_deg * 16) / 10); 
+    rtU_Right.a_mechAngle = (encoder_x.aligned_count * 23040) / (uint32_t)ENCODER_X_CPR;
     } 
     #else
   rtU_Right.r_inpTgt = pwmr;
-    //rtU_Right.a_mechAngle   = 0;
     #endif
     
     /* Step the controller */
@@ -336,7 +339,17 @@ void DMA1_Channel1_IRQHandler(void) {
     RIGHT_TIM->RIGHT_TIM_V  = (uint16_t)CLAMP(vr + pwm_res / 2, pwm_margin, pwm_res-pwm_margin);
     RIGHT_TIM->RIGHT_TIM_W  = (uint16_t)CLAMP(wr + pwm_res / 2, pwm_margin, pwm_res-pwm_margin);
   // =================================================================
+   
 
+  //External Break Resistor Output Control
+  #ifdef EXTBRK_EN
+  I_BusR = curR_DC + curL_DC - MAX_REGEN_CURRENT; // Total bus current
+  if (I_BusR > 2*BRKRESACT_SENS){ // If over max regen current, apply braking on left motor
+     EXT_PWM_BRK = CLAMP(((((int32_t)I_BusR * BRAKE_RESISTANCE * pwm_res) /(50*batVoltageCalib))) ,0, (((uint32_t)pwm_res*90)/100));
+    }else{
+     EXT_PWM_BRK = 0;
+    }
+  #endif
   /* Indicate task complete */
   OverrunFlag = false;
  

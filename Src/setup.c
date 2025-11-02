@@ -608,13 +608,55 @@ SET_BIT(DBGMCU->CR,DBGMCU_CR_DBG_TIM8_STOP);
 
   htim_left.Instance->RCR = 1;
 
+  /* Optional: External brake resistor PWM on CH3 or CH4
+   * Enable this by defining EXTBRK_EN and selecting channel by
+   * defining EXTBRK_USE_CH3 or EXTBRK_USE_CH4 in `Inc/config.h`.
+   */
+#if defined(EXTBRK_EN) && (defined(EXTBRK_USE_CH3) || defined(EXTBRK_USE_CH4))
+  {
+    TIM_HandleTypeDef htim_brk = {0};
+    TIM_OC_InitTypeDef sConfigOC = {0};
+    GPIO_InitTypeDef gpio = {0};
+
+    __HAL_RCC_TIM5_CLK_ENABLE();
+
+    gpio.Pin = EXTBRK_PIN;
+    gpio.Mode = GPIO_MODE_AF_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(EXTBRK_PORT, &gpio);
+
+    
+    htim_brk.Instance = TIM5;
+    htim_brk.Init.Prescaler = 0;
+    htim_brk.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim_brk.Init.Period = pwmPeriodCounts;
+    htim_brk.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    htim_brk.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+    HAL_TIM_PWM_Init(&htim_brk);
+
+    sConfigOC.OCMode = TIM_OCMODE_PWM1;
+    sConfigOC.Pulse = 0;
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+
+#if defined(EXTBRK_USE_CH3)
+    HAL_TIM_PWM_ConfigChannel(&htim_brk, &sConfigOC, TIM_CHANNEL_3);
+    HAL_TIM_PWM_Start(&htim_brk, TIM_CHANNEL_3);
+#elif defined(EXTBRK_USE_CH4)
+    HAL_TIM_PWM_ConfigChannel(&htim_brk, &sConfigOC, TIM_CHANNEL_4);
+    HAL_TIM_PWM_Start(&htim_brk, TIM_CHANNEL_4);
+#endif
+  }
+#endif
+
   __HAL_TIM_ENABLE(&htim_right);
 }
 
 void MX_ADC1_Init(void) {
   ADC_MultiModeTypeDef multimode;
   ADC_ChannelConfTypeDef sConfig;
-
+  ADC_AnalogWDGConfTypeDef AnalogWDGConfig = {0};
   __HAL_RCC_ADC1_CLK_ENABLE();
 
   hadc1.Instance                   = ADC1;
@@ -630,11 +672,21 @@ void MX_ADC1_Init(void) {
     * ADC1 External Event regular conversion is connected to TIM8 TRG0
     */
   __HAL_AFIO_REMAP_ADC1_ETRGREG_ENABLE();
-
-  /**Configure the ADC multi-mode
-    */
-  multimode.Mode = ADC_DUALMODE_REGSIMULT;
+  /** Configure the ADC multi-mode
+  */
+ multimode.Mode = ADC_DUALMODE_REGSIMULT;
   HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode);
+
+  /** Configure Analog WatchDog 1
+  */
+  AnalogWDGConfig.WatchdogMode = ADC_ANALOGWATCHDOG_SINGLE_REG;
+  /* Right DC link current (ADC1) watchdog: use compile-time counts from config.h */
+  AnalogWDGConfig.HighThreshold = DCR_HIGH_COUNTS;
+  AnalogWDGConfig.LowThreshold = DCR_LOW_COUNTS;
+  /* Right DC sensor is on PC1 -> ADC_CHANNEL_11 */
+  AnalogWDGConfig.Channel = ADC_CHANNEL_11;
+  AnalogWDGConfig.ITMode = ENABLE;
+  HAL_ADC_AnalogWDGConfig(&hadc1, &AnalogWDGConfig);
 
   sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
   sConfig.Channel = ADC_CHANNEL_11;  // pc1 left cur  ->  right
@@ -667,23 +719,29 @@ void MX_ADC1_Init(void) {
 
   __HAL_ADC_ENABLE(&hadc1);
 
+  /* ADC1/2 analog watchdogs: make sure their IRQ runs at highest priority (group 0)
+   * so critical DC link and phase-current watchdogs are serviced immediately.
+   */
+  HAL_NVIC_SetPriority(ADC1_2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(ADC1_2_IRQn);
+
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   DMA1_Channel1->CCR   = 0;
-  DMA1_Channel1->CNDTR = 3;
+  DMA1_Channel1->CNDTR = ADC12_CONV_COUNT;
   DMA1_Channel1->CPAR  = (uint32_t) & (ADC1->DR);
   DMA1_Channel1->CMAR  = (uint32_t)&adc_buffer.adc12.raw[0];
   DMA1_Channel1->CCR   = DMA_CCR_MSIZE_1 | DMA_CCR_PSIZE_1 | DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_TCIE;
   DMA1_Channel1->CCR |= DMA_CCR_EN;
 
-  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 2, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 }
 
 /* ADC2 init function */
 void MX_ADC2_Init(void) {
   ADC_ChannelConfTypeDef sConfig;
-
+  ADC_AnalogWDGConfTypeDef AnalogWDGConfig = {0};
   __HAL_RCC_ADC2_CLK_ENABLE();
 
   // HAL_ADC_DeInit(&hadc2);
@@ -698,6 +756,16 @@ void MX_ADC2_Init(void) {
   hadc2.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
   hadc2.Init.NbrOfConversion       = ADC12_CONV_COUNT;
   HAL_ADC_Init(&hadc2);
+
+   AnalogWDGConfig.WatchdogMode = ADC_ANALOGWATCHDOG_SINGLE_REG;
+  /* Left DC link current (ADC2) watchdog: use compile-time counts from config.h */
+  AnalogWDGConfig.HighThreshold = DCL_HIGH_COUNTS;
+  AnalogWDGConfig.LowThreshold = DCL_LOW_COUNTS;
+  /* Left DC sensor is on PC0 -> ADC_CHANNEL_10 */
+  AnalogWDGConfig.Channel = ADC_CHANNEL_10;
+  AnalogWDGConfig.ITMode = ENABLE;
+  HAL_ADC_AnalogWDGConfig(&hadc2, &AnalogWDGConfig);
+
 
   sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
   sConfig.Channel = ADC_CHANNEL_10;  // pc0 right cur   -> left
@@ -737,7 +805,7 @@ void MX_ADC3_Init(void) {
   #if defined(ANALOG_BUTTON)
   sConfig.Channel = BUTTON_ADC_CHANNEL;
   sConfig.Rank = 1;  //Power Button
-  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_13CYCLES_5;
   HAL_ADC_ConfigChannel(&hadc3, &sConfig);
   #endif
 
@@ -762,14 +830,8 @@ void MX_ADC3_Init(void) {
  __HAL_ADC_ENABLE(&hadc3);  // Enable ADC3
 
   #if defined(DC_LINK_WATCHDOG_ENABLE)
-     /* The actual analog watchdog thresholds and IT mode are configured
-   * inside DcLinkWatchdog_Init() so that runtime thresholds and
-   * hysteresis (arm/restore) logic are centralized in util.c.
-   * We still enable the IRQ here so the handler can be installed.
-   */
-  HAL_NVIC_SetPriority(ADC3_IRQn, 4, 0);
+  HAL_NVIC_SetPriority(ADC3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(ADC3_IRQn);
-    DcLinkWatchdog_Init();
   #endif
  
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -792,9 +854,6 @@ void MX_ADC3_Init(void) {
    */
   DMA2_Channel5->CCR   = DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_MINC | DMA_CCR_CIRC;
   DMA2_Channel5->CCR  |= DMA_CCR_EN;                                  // Enable channel to start transfers
-  //DMA2_Channel5->CCR |= DMA_CCR_TCIE;
-  //HAL_NVIC_SetPriority(DMA2_Channel4_5_IRQn, 3, 0);
-  //HAL_NVIC_EnableIRQ(DMA2_Channel4_5_IRQn);
  
   #if defined(ANALOG_BUTTON)
   AnalogButton_Init();

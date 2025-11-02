@@ -78,11 +78,12 @@
 #define BAT_FILT_COEF           6553       // battery voltage filter coefficient in fixed-point. coef_fixedPoint = coef_floatingPoint * 2^16. In this case 655 = 0.01 * 2^16
 #define BAT_CALIB_REAL_VOLTAGE  3970      // input voltage measured by multimeter (multiplied by 100). In this case 43.00 V * 100 = 4300
 #define BAT_CALIB_ADC           1492      // adc-value measured by mainboard (value nr 5 on UART debug output)
-#define BAT_CELLS               6        // battery number of cells. Normal Hoverboard battery: 10s
+#define BAT_CELLS               10       // battery number of cells. Normal Hoverboard battery: 10s = 36V nominal, 42V full charge. For 36V battery use 10, for 24V use 6, for 48V use 13 etc.
 #define BAT_LVL2_ENABLE         0         // to beep or not to beep, 1 or 0
 #define BAT_LVL1_ENABLE         0         // to beep or not to beep, 1 or 0
 #define BAT_DEAD_ENABLE         1         // to poweroff or not to poweroff, 1 or 0
 #define BAT_BLINK_INTERVAL      80        // battery led blink interval (80 loops * 5ms ~= 400ms)
+#define BAT_HIGH                (550 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE;
 #define BAT_LVL5                (390 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // Green blink:  no beep
 #define BAT_LVL4                (380 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // Yellow:       no beep
 #define BAT_LVL3                (370 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // Yellow blink: no beep 
@@ -90,7 +91,7 @@
 #define BAT_LVL1                (350 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // Red blink:    fast beep. Your battery is almost empty. Charge now! [V*100/cell]. In this case 3.50 V/cell
 #define BAT_DEAD                (330 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE    // All leds off: undervoltage poweroff. (while not driving) [V*100/cell]. In this case 3.37 V/cell
 #define HARD_LIM                 1800  //hard 18v lower limit to prevent damage to driver
-#define HARD_18V_COUNTS (((HARD_LIM) * BAT_CALIB_ADC + (BAT_CALIB_REAL_VOLTAGE / 2U)) / (BAT_CALIB_REAL_VOLTAGE))
+#define HARD_18V_COUNTS (((HARD_LIM) * BAT_CALIB_ADC + (BAT_CALIB_REAL_VOLTAGE / 2)) / (BAT_CALIB_REAL_VOLTAGE))
 // ######################## END OF BATTERY ###############################
 
 
@@ -119,26 +120,8 @@
 
 
 // ############################### DC LINK WATCHDOG ###############################
-// Configure the analog watchdog limits used to drive the brake resistor logic.
-// Express thresholds in V*100 (same unit as BAT_CALIB_REAL_VOLTAGE).
-#define DC_LINK_WATCHDOG_ENABLE
-#if defined(DC_LINK_WATCHDOG_ENABLE)
-  #define DC_LINK_OVERVOLTAGE_HIGH_X100   (BAT_CALIB_REAL_VOLTAGE + 300U)  // e.g. +5 V
-  #define DC_LINK_OVERVOLTAGE_LOW_X100    (BAT_CALIB_REAL_VOLTAGE + 100U)  // e.g. +1 V
-
-  #define DC_LINK_ADC_COUNTS_FROM_X100(vx100) \
-    (((vx100) * BAT_CALIB_ADC + (BAT_CALIB_REAL_VOLTAGE / 2U)) / BAT_CALIB_REAL_VOLTAGE)
-
-  #define DC_LINK_OVERVOLTAGE_HIGH_COUNTS  DC_LINK_ADC_COUNTS_FROM_X100(DC_LINK_OVERVOLTAGE_HIGH_X100)
-  #define DC_LINK_OVERVOLTAGE_LOW_COUNTS   DC_LINK_ADC_COUNTS_FROM_X100(DC_LINK_OVERVOLTAGE_LOW_X100)
-
-  #if DC_LINK_OVERVOLTAGE_HIGH_COUNTS > 4095
-    #error "DC_LINK_OVERVOLTAGE_HIGH_X100 maps beyond 12-bit ADC range"
-  #endif
-  #if DC_LINK_OVERVOLTAGE_LOW_COUNTS >= DC_LINK_OVERVOLTAGE_HIGH_COUNTS
-    #error "DC_LINK_OVERVOLTAGE_LOW_X100 must map below the overvoltage high threshold"
-  #endif
-#endif
+//watchdog for over or under voltage protection
+//#define DC_LINK_WATCHDOG_ENABLE
 // ######################## END OF DC LINK WATCHDOG ###############################
 
 
@@ -174,7 +157,7 @@
 #define TRQ_MODE        3               // [-] TORQUE mode
 
 // Enable/Disable Motor
-//#define MOTOR_LEFT_ENA                  // [-] Enable LEFT motor.  Comment-out if this motor is not needed to be operational
+#define MOTOR_LEFT_ENA                  // [-] Enable LEFT motor.  Comment-out if this motor is not needed to be operational
 #define MOTOR_RIGHT_ENA                 // [-] Enable RIGHT motor. Comment-out if this motor is not needed to be operational
 
 // Control selections
@@ -185,7 +168,16 @@
 // Limitation settings
 #define I_MOT_MAX       15              // [A] Maximum single motor current limit
 #define I_DC_MAX        17              // [A] Maximum stage2 DC Link current limit for Commutation and Sinusoidal types (This is the final current protection. Above this value, current chopping is applied. To avoid this make sure that I_DC_MAX = I_MOT_MAX + 2A)
-#define N_MOT_MAX       1000            // [rpm] Maximum motor speed limit
+#define I_DCL_POS       25              // [A]    LEFT Positive DC link current protection limit. Above this value, the power stage is disabled. 
+#define I_DCL_NEG       25              // [A]    LEFT Negative DC link current protection limit. Below this value, the power stage is disabled.
+#define I_DCR_POS       25              // [A]    RIGHT Positive DC link current protection limit. Above this value, the power stage is disabled.  
+#define I_DCR_NEG       25              // [A]    RIGHT Negative DC link current protection limit. Below this value, the power stage is disabled.
+#define DCL_HIGH_COUNTS  (2000 + (I_DCL_POS * A2BIT_CONV))  // compile-time left high threshold in ADC counts (nominal offset 2000)
+#define DCL_LOW_COUNTS   (2000 - (I_DCL_NEG * A2BIT_CONV))  // compile-time left low threshold in ADC counts (nominal offset 2000)
+#define DCR_HIGH_COUNTS  (2000 + (I_DCR_POS * A2BIT_CONV))  // compile-time right high threshold in ADC counts (nominal offset 2000)
+#define DCR_LOW_COUNTS   (2000 - (I_DCR_NEG * A2BIT_CONV))  // compile-time right low threshold in ADC counts (nominal offset 2000)
+#define N_MOT_MAX       1000             // [rpm] Maximum motor speed limit
+#define N_POLE_PAIRS    15                //[PP] Number of motor pole pairs: 15 for standard Hoverboard motors
 
 // Field Weakening / Phase Advance
 #define FIELD_WEAK_ENA  0               // [-] Field Weakening / Phase Advance enable flag: 0 = Disabled (default), 1 = Enabled
@@ -194,29 +186,10 @@
 #define FIELD_WEAK_HI   1000            // (1000, 1500] Input target High threshold for reaching maximum Field Weakening / Phase Advance. Do NOT set this higher than 1500.
 #define FIELD_WEAK_LO   750             // ( 500, 1000] Input target Low threshold for starting Field Weakening / Phase Advance. Do NOT set this higher than 1000.
 
-// Extra functionality
 //#define BEEPER_OFF
 //#define ENCODER_X
 //#define ENCODER_Y                         // 
 #define ANALOG_BUTTON                     // ANALOG BUTTON_PIN supports greater range of voltage levels.
-#if defined(ANALOG_BUTTON)
-  #define POWER_BUTTON_ADC_FULL_SCALE        4096U   // 12-bit ADC
-  #define POWER_BUTTON_ADC_REFERENCE_MV      3300U   // ADC reference voltage in millivolts
-  #define POWER_BUTTON_DIVIDER_RATIO_X100    1800U   // Resistor divider scaling (e.g. 18.0 => 33V -> 1.83V)
-  #define POWER_BUTTON_THRESHOLD_MV          19000U  // Trip point for treating the switch as pressed
-  #define POWER_BUTTON_RELEASE_MARGIN_MV     2000U   // Hysteresis below the trip point before we call it released
-
-  #if POWER_BUTTON_RELEASE_MARGIN_MV >= POWER_BUTTON_THRESHOLD_MV
-    #error "POWER_BUTTON_RELEASE_MARGIN_MV must be smaller than POWER_BUTTON_THRESHOLD_MV"
-  #endif
-
-  #define POWER_BUTTON_ADC_DENOM          ((POWER_BUTTON_ADC_REFERENCE_MV) * (POWER_BUTTON_DIVIDER_RATIO_X100))
-  #define POWER_BUTTON_ADC_COUNTS_FROM_MV(mv) \
-    (((((mv) * POWER_BUTTON_ADC_FULL_SCALE) * 100ULL) + POWER_BUTTON_ADC_DENOM / 2ULL) / POWER_BUTTON_ADC_DENOM)
-
-  #define ANALOG_BUTTON_PRESSED_MIN    POWER_BUTTON_ADC_COUNTS_FROM_MV(POWER_BUTTON_THRESHOLD_MV)
-  #define ANALOG_BUTTON_RELEASE_MAX    POWER_BUTTON_ADC_COUNTS_FROM_MV((POWER_BUTTON_THRESHOLD_MV) - (POWER_BUTTON_RELEASE_MARGIN_MV))
-#endif
 //#define HOCP                            // Tie PA6/PB12 hardware over-current signals into TIM1/TIM8 break inputs
 // #define STANDSTILL_HOLD_ENABLE          // [-] Flag to hold the position when standtill is reached. Only available and makes sense for VOLTAGE or TORQUE mode.
 // #define ELECTRIC_BRAKE_ENABLE           // [-] Flag to enable electric brake and replace the motor "freewheel" with a constant braking when the input torque request is 0. Only available and makes sense for TORQUE mode.
@@ -694,15 +667,34 @@
  * This variant is for using encoder for motor control.
 */
 #define GD32F103Rx              1   // define if you are using a GD32F103Rx MCU to set system clock to 108MHz  
-#define HOCP                            // Tie PA6/PB12 hardware over-current signals into TIM1/TIM8 break inputs
+#define HOCP                        // Tie PA6/PB12 hardware over-current signals into TIM1/TIM8 break inputs
 #define BEEPER_OFF
 #define ENCODER_X
-//#define ENCODER_Y  
+//#define ENCODER_Y
+#define INTBRK_L_EN
+//#define EXTBRK_EN                   // Enable external braking resistor pin
+#ifdef EXTBRK_EN
+#define EXTBRK_USE_CH3                    
+//#define EXTBRK_USE_CH4
+#endif
+
+#if defined (INTBRK_L_EN) || defined (EXTBRK_EN)
+
+  #define BRAKE_RESISTANCE 300                // [Ohm]3ohm X100 Value of the braking resistor. Set it to your own brake resistor resistance, increase the resistance here a bit for example I use 2.2ohm but I set to 3ohm here to be safe. 
+  #define BRKRESACT_SENS    40 / 20           //[A]40mA  Brake resistor activation sensitivity. Set same as MAX_REGEN_CURRENT if using battery. If using psu set 40mA-60mA. 
+  #define MAX_REGEN_CURRENT 0 / 20            // [A]0mA  Maximum regenerative current that can be dissipated in the PSU or BATTERY. Set in 20mA steps 0, 20, 40, 60, 80, 100 etc. Set 0 for PSU!
+
+#endif  
 
 #if defined ENCODER_X
 #define ENCODER_X_PPR              2048     // Pulses per revolution
-#define ALIGNMENT_X_POWER        200      // [-] Voltage used for sensor alignment. [-1000, 1000]
+#define ALIGNMENT_X_POWER        6553      // [-] Voltage used for sensor alignment. [-1000, 1000]
 #endif
+#if defined ENCODER_Y
+#define ENCODER_Y_PPR            2048
+#define ALIGNMENT_Y_POWER        6553
+#endif
+
   #define FLASH_WRITE_KEY        0x1011    // Flash memory writing key.
   #undef  CTRL_MOD_REQ
   #undef  CTRL_TYP_SEL
@@ -710,10 +702,11 @@
   #define CTRL_MOD_REQ           TRQ_MODE  
   
   #define TANK_STEERING  
-  //#define MOTOR_LEFT_ENA                  // [-] Enable LEFT motor.  Comment-out if this motor is not needed to be operational
+#undef MOTOR_LEFT_ENA
+//#define MOTOR_LEFT_ENA                  // [-] Enable LEFT motor.  Comment-out if this motor is not needed to be operational
 #define MOTOR_RIGHT_ENA                 // [-] Enable RIGHT motor. Comment-out if this motor is not needed to be operational
 #undef  DIAG_ENA 
-#define DIAG_ENA                 1               // [-] Motor Diagnostics enable flag: 0 = Disabled, 1 = Enabled (default)
+#define DIAG_ENA                 0               // [-] disable diag if using motor at stall
 #undef  INACTIVITY_TIMEOUT
 #define INACTIVITY_TIMEOUT       100
 // Limitation settings
@@ -723,18 +716,21 @@
 #define I_DC_MAX                 17              // [A] Maximum stage2 DC Link current limit for Commutation and Sinusoidal types (This is the final current protection. Above this value, current chopping is applied. To avoid this make sure that I_DC_MAX = I_MOT_MAX + 2A)
 #define N_MOT_MAX                2000            // [rpm] Maximum motor speed limit
 
+#define DC_LINK_WATCHDOG_ENABLE 
+#undef FIELD_WEAK_ENA
 #define FIELD_WEAK_ENA           0 
 //#define RC_PWM_RIGHT           0         // use RC PWM as input on the RIGHT cable.  Number indicates priority for dual-input. Disable DEBUG_SERIAL_USART3!
-//#define HW_PWM                   0 
-#define SW_PWM_RIGHT             0         // UsingPWM input capture on PB10 and PB11 (duty cycle mapped to 0 to -1000, 0, 1000,)
+#define HW_PWM                   0 
+//#define SW_PWM_RIGHT           0         // UsingPWM input capture on PB10 and PB11 (duty cycle mapped to 0 to -1000, 0, 1000,)
 //#define SW_PWM_LEFT            0 
+//#define CONTROL_PPM_LEFT 0
+//#define PPM_NUM_CHANNELS 1
 //#define CONTROL_SERIAL_USART3  0    // left sensor board cable, disable if ADC or PPM is used! For Arduino control check the hoverSerial.ino
 //#define FEEDBACK_SERIAL_USART3      // left sensor board cable, disable if ADC or PPM is used!
-  #define PRI_INPUT1             0, -1000, 0, 1000,   0    
-  #define PRI_INPUT2             2, -1000, 0, 1000,   0   
-
+  #define PRI_INPUT1             0, -16000, 0, 16000,   0    
+  #define PRI_INPUT2             2, -16000, 0, 16000,   0   
   #define RATE                   32767 
-  #define FILTER                 15000
+  #define FILTER                 65535
   //#define INVERT_R_DIRECTION
   //#define INVERT_L_DIRECTION
   //#define DEBUG_SERIAL_USART3         // left sensor cable debug
@@ -749,20 +745,34 @@
  * This variant is for using encoders for motor control.
 */
 #define GD32F103Rx              1   // define if you are using a GD32F103Rx MCU to set system clock to 108MHz  
+#define HOCP                        // Tie PA6/PB12 hardware over-current signals into TIM1/TIM8 break inputs
 #define BEEPER_OFF
 #define ENCODER_X
-#define ENCODER_Y  
+#define ENCODER_Y
+#define EXTBRK_EN                   // Enable external braking resistor pin
+#ifdef EXTBRK_EN
+#define EXTBRK_USE_CH3                    
+//#define EXTBRK_USE_CH4
+#endif
+
+#if defined (INTBRK_L_EN) || defined (EXTBRK_EN)
+
+  #define BRAKE_RESISTANCE 300                // [Ohm]3ohm X100 Value of the braking resistor. Set it to your own brake resistor resistance, increase the resistance here a bit for example I use 2.2ohm but I set to 3ohm here to be safe. 
+  #define BRKRESACT_SENS    40 / 20           //[A]40mA  Brake resistor activation sensitivity. Set same as MAX_REGEN_CURRENT if using battery. If using psu set 40mA-60mA. 
+  #define MAX_REGEN_CURRENT 0 / 20            // [A]0mA  Maximum regenerative current that can be dissipated in the PSU or BATTERY. Set in 20mA steps 0, 20, 40, 60, 80, 100 etc. Set 0 for PSU!
+
+#endif  
 
 #if defined ENCODER_X
 #define ENCODER_X_PPR              2048     // Pulses per revolution
-#define ALIGNMENT_X_POWER        200      // [-] Voltage used for sensor alignment. [-1000, 1000]
+#define ALIGNMENT_X_POWER        6553      // [-] Voltage used for sensor alignment. [-1000, 1000]
 #endif
 #if defined ENCODER_Y
-#define ENCODER_Y_PPR              2048     // Pulses per revolution
-#define ALIGNMENT_Y_POWER        200      // [-] Voltage used for sensor alignment. [-1000, 1000]
+#define ENCODER_Y_PPR            2048
+#define ALIGNMENT_Y_POWER        6553
 #endif
 
-  #define FLASH_WRITE_KEY        0x1011    // Flash memory writing key.
+  #define FLASH_WRITE_KEY        0x1012    // Flash memory writing key.
   #undef  CTRL_MOD_REQ
   #undef  CTRL_TYP_SEL
   #define CTRL_TYP_SEL           FOC_CTRL 
@@ -786,18 +796,19 @@
 //#define RC_PWM_RIGHT           0         // use RC PWM as input on the RIGHT cable.  Number indicates priority for dual-input. Disable DEBUG_SERIAL_USART3!
 //#define HW_PWM                 0 
 #define SW_PWM_RIGHT             0         // UsingPWM input capture on PB10 and PB11 (duty cycle mapped to 0 to -1000, 0, 1000,)
-//#define SW_PWM_LEFT            0 
+//#define SW_PWM_LEFT              0 
 //#define CONTROL_SERIAL_USART3  0    // left sensor board cable, disable if ADC or PPM is used! For Arduino control check the hoverSerial.ino
 //#define FEEDBACK_SERIAL_USART3      // left sensor board cable, disable if ADC or PPM is used!
   #define PRI_INPUT1             2, -1000, 0, 1000,   0    
   #define PRI_INPUT2             2, -1000, 0, 1000,   0   
 
+  #undef RATE
+  #undef FILTER 
   #define RATE                   32767 
-  #define FILTER                 15000
+  #define FILTER                 65535
   #define INVERT_R_DIRECTION
   //#define INVERT_L_DIRECTION
   //#define DEBUG_SERIAL_USART3         // left sensor cable debug
-
 #endif
 
 // ########################### UART SETIINGS ############################
@@ -841,6 +852,44 @@
 #else
   #define INPUTS_NR               1
 #endif
+
+#if defined(DC_LINK_WATCHDOG_ENABLE)
+  #define DC_LINK_OVERVOLTAGE_HIGH_X100   (BAT_CALIB_REAL_VOLTAGE + 300)  // e.g. +5 V
+  //#define DC_LINK_OVERVOLTAGE_LOW_X100    (BAT_CALIB_REAL_VOLTAGE + 100U)  // e.g. +1 V
+
+  #define DC_LINK_ADC_COUNTS_FROM_X100(vx100) \
+    (((vx100) * BAT_CALIB_ADC + (BAT_CALIB_REAL_VOLTAGE / 2)) / BAT_CALIB_REAL_VOLTAGE)
+
+  #define DC_LINK_OVERVOLTAGE_HIGH_COUNTS  DC_LINK_ADC_COUNTS_FROM_X100(DC_LINK_OVERVOLTAGE_HIGH_X100)
+  //#define DC_LINK_OVERVOLTAGE_LOW_COUNTS   DC_LINK_ADC_COUNTS_FROM_X100(DC_LINK_OVERVOLTAGE_LOW_X100)
+
+  #if DC_LINK_OVERVOLTAGE_HIGH_COUNTS > 4095
+    #error "DC_LINK_OVERVOLTAGE_HIGH_X100 maps beyond 12-bit ADC range"
+  #endif
+
+//#if DC_LINK_OVERVOLTAGE_LOW_COUNTS >= DC_LINK_OVERVOLTAGE_HIGH_COUNTS
+ //   #error "DC_LINK_OVERVOLTAGE_LOW_X100 must map below the overvoltage high threshold"
+ // #endif
+#endif
+#if defined(ANALOG_BUTTON)
+  #define POWER_BUTTON_ADC_FULL_SCALE        4096U   // 12-bit ADC
+  #define POWER_BUTTON_ADC_REFERENCE_MV      3300U   // ADC reference voltage in millivolts
+  #define POWER_BUTTON_DIVIDER_RATIO_X100    1800U   // Resistor divider scaling (e.g. 18.0 => 33V -> 1.83V)
+  #define POWER_BUTTON_THRESHOLD_MV          18000U  // Trip point for treating the switch as pressed
+  #define POWER_BUTTON_RELEASE_MARGIN_MV     2000U   // Hysteresis below the trip point before we call it released
+
+  #if POWER_BUTTON_RELEASE_MARGIN_MV >= POWER_BUTTON_THRESHOLD_MV
+    #error "POWER_BUTTON_RELEASE_MARGIN_MV must be smaller than POWER_BUTTON_THRESHOLD_MV"
+  #endif
+
+  #define POWER_BUTTON_ADC_DENOM          ((POWER_BUTTON_ADC_REFERENCE_MV) * (POWER_BUTTON_DIVIDER_RATIO_X100))
+  #define POWER_BUTTON_ADC_COUNTS_FROM_MV(mv) \
+    (((((mv) * POWER_BUTTON_ADC_FULL_SCALE) * 100ULL) + POWER_BUTTON_ADC_DENOM / 2ULL) / POWER_BUTTON_ADC_DENOM)
+
+  #define ANALOG_BUTTON_PRESSED_MIN    POWER_BUTTON_ADC_COUNTS_FROM_MV(POWER_BUTTON_THRESHOLD_MV)
+  #define ANALOG_BUTTON_RELEASE_MAX    POWER_BUTTON_ADC_COUNTS_FROM_MV((POWER_BUTTON_THRESHOLD_MV) - (POWER_BUTTON_RELEASE_MARGIN_MV))
+#endif
+
 // ########################### END OF APPLY DEFAULT SETTING ############################
 
 
@@ -922,6 +971,12 @@
 #if defined(CONTROL_PPM_LEFT) && (defined(RC_PWM_LEFT) || defined(SW_PWM_LEFT))
   #error CONTROL_PPM_LEFT and (RC_PWM_LEFT or SW_PWM_LEFT) not allowed. It is on the same cable.
 #endif
+#if defined(INTBRK_L_EN) && defined(MOTOR_LEFT_ENA)
+  #error INTBRK_L_EN and MOTOR_LEFT_ENA cannot be used at the same time. Please disable MOTOR_LEFT_ENA when using INTBRK_L_EN.
+#endif
+#if defined(INTBRK_L_EN) && defined(EXTBRK_EN)
+  #error INTBRK_L_EN and EXTBRK_EN cannot be used at the same time. Please choose one braking method.
+#endif
 
 
 // RIGHT cable checks
@@ -969,4 +1024,3 @@
 // ############################# END OF VALIDATE SETTINGS ############################
 
 #endif // CONFIG_H
-

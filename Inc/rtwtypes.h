@@ -4,8 +4,8 @@
  * Code generated for Simulink model 'BLDC_controller'.
  *
  * Model version                  : 1.1297
- * Simulink Coder version         : 8.13 (R2017b) 24-Jul-2017
- * C/C++ source code generated on : Sun Mar  6 11:02:11 2022
+ * Simulink Coder version         : 25.1 (R2025a) 21-Nov-2024
+ * C/C++ source code generated on : Wed Oct 22 01:53:29 2025
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex
@@ -22,13 +22,13 @@
 
 /* Logical type definitions */
 #if (!defined(__cplusplus))
-#  ifndef false
-#   define false                       (0U)
-#  endif
+#ifndef false
+#define false                          (0U)
+#endif
 
-#  ifndef true
-#   define true                        (1U)
-#  endif
+#ifndef true
+#define true                           (1U)
+#endif
 #endif
 
 /*=======================================================================*

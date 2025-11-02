@@ -25,6 +25,7 @@
 
 #include "stm32f1xx_hal.h"
 #include "config.h"
+#include "rtwtypes.h" 
 
 #define LEFT_HALL_U_PIN GPIO_PIN_5
 #define LEFT_HALL_V_PIN GPIO_PIN_6
@@ -212,6 +213,23 @@
 #define PWM_PORT_CH2        GPIOB
 #endif
 
+// External brake resistor PWM configuration
+// Select which channel to use for the external brake resistor PWM
+// Change Timer and pins if using analog input
+#if defined(EXTBRK_USE_CH3)
+#define EXTBRK_TIM             TIM5
+#define EXTBRK_TIM_CHANNEL     TIM_CHANNEL_3
+#define EXTBRK_PIN             GPIO_PIN_2
+#define EXTBRK_PORT            GPIOA
+#define EXT_PWM_BRK            TIM5->CCR3
+#elif defined(EXTBRK_USE_CH4)
+#define EXTBRK_TIM             TIM5
+#define EXTBRK_TIM_CHANNEL     TIM_CHANNEL_4
+#define EXTBRK_PIN             GPIO_PIN_3
+#define EXTBRK_PORT            GPIOA
+#define EXT_PWM_BRK            TIM5->CCR4
+#endif
+
 #if defined(HOCP)
 #define TIM1_BKIN_PIN       GPIO_PIN_6
 #define TIM1_BKIN_PORT      GPIOA
@@ -298,6 +316,31 @@ typedef struct {  // Structure for ADC3 values
 #else
  #define ADC3_CONV_COUNT 4
 #endif
+
+#if defined(HW_PWM)
+extern volatile boolean_T hw_pwm_ready;
+void calc_hw_pwm(void);
+#endif
+
+#if defined(CONTROL_PPM_LEFT) || defined(CONTROL_PPM_RIGHT)
+extern volatile boolean_T ppm_ready;
+void calc_ppm(void);
+#endif
+
+#if defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)
+extern volatile boolean_T sw_pwm_ready_ch1;
+extern volatile boolean_T sw_pwm_ready_ch2;
+void calc_sw_pwm_ch1(void);
+void calc_sw_pwm_ch2(void);
+#endif
+
+#if defined(RC_PWM_LEFT) || defined(RC_PWM_RIGHT)
+extern volatile boolean_T rc_pwm_ready_ch1;
+extern volatile boolean_T rc_pwm_ready_ch2;
+void calc_rc_pwm_ch1(void);
+void calc_rc_pwm_ch2(void);
+#endif
+
 
 typedef union {
   adc3_named_samples_t value;

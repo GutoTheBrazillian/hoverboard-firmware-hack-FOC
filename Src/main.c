@@ -36,10 +36,12 @@
 #include "hd44780.h"
 #endif
 
+int main(void);
+
 void SystemClock_Config(void);
 void verifyClocks(void);
 
-typedef struct {
+typedef struct {  // Structure for clock diagnostics
   uint32_t sysclk_hz;
   uint32_t hclk_hz;
   uint32_t pclk1_hz;
@@ -99,6 +101,21 @@ extern uint8_t enable;                  // global variable for motor enable
 
 extern int16_t batVoltage;              // global variable for battery voltage
 
+
+#if defined(CONTROL_PPM_LEFT) || defined(CONTROL_PPM_RIGHT)
+      volatile boolean_T ppm_ready = 0;
+#endif
+#if defined(RC_PWM_LEFT) || defined(RC_PWM_RIGHT)
+     volatile boolean_T rc_pwm_ready_ch1 = 0;
+     volatile boolean_T rc_pwm_ready_ch2 = 0;
+#endif
+#ifdef HW_PWM
+  volatile boolean_T hw_pwm_ready = 0;
+#endif
+#if defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)
+  volatile boolean_T sw_pwm_ready_ch1 = 0;
+  volatile boolean_T sw_pwm_ready_ch2 = 0;
+#endif
 #if defined(SIDEBOARD_SERIAL_USART2)
 extern SerialSideboard Sideboard_L;
 #endif
@@ -106,18 +123,18 @@ extern SerialSideboard Sideboard_L;
 extern SerialSideboard Sideboard_R;
 #endif
 #if (defined(CONTROL_PPM_LEFT) && defined(DEBUG_SERIAL_USART3)) || (defined(CONTROL_PPM_RIGHT) && defined(DEBUG_SERIAL_USART2))
-extern volatile uint16_t ppm_captured_value[PPM_NUM_CHANNELS+1];
+extern  uint16_t ppm_captured_value[PPM_NUM_CHANNELS+1];
 #endif
 #if (defined(RC_PWM_LEFT) && defined(DEBUG_SERIAL_USART3)) || (defined(RC_PWM_RIGHT) && defined(DEBUG_SERIAL_USART2))
-extern volatile int16_t pwm_captured_ch1_value;
-extern volatile int16_t pwm_captured_ch2_value;
+extern  int16_t pwm_captured_ch1_value;
+extern  int16_t pwm_captured_ch2_value;
 #endif
 #if (defined(SW_PWM_LEFT) && defined(DEBUG_SERIAL_USART3)) || (defined(SW_PWM_RIGHT) && defined(DEBUG_SERIAL_USART2))
-extern volatile int16_t pwm_captured_ch1_value;
-extern volatile int16_t pwm_captured_ch2_value;
+extern  int16_t pwm_captured_ch1_value;
+extern  int16_t pwm_captured_ch2_value;
 #endif
 #if defined(HW_PWM) && (defined(DEBUG_SERIAL_USART3) || defined(DEBUG_SERIAL_USART2))
-extern volatile int16_t pwm_captured_ch2_value;
+extern  int16_t pwm_captured_ch2_value;
 #endif
 
 //------------------------------------------------------------------------
@@ -225,32 +242,17 @@ int main(void) {
   BLDC_Init();        // BLDC Controller Init
 
   HAL_GPIO_WritePin(OFF_PORT, OFF_PIN, GPIO_PIN_SET);   // Activate Latch
+  HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
   Input_Lim_Init();   // Input Limitations Init
   Input_Init();       // Input Init
 
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
   HAL_ADC_Start(&hadc3);
-
-#if defined(BAT_DEAD_ENABLE)
-  /* Allow a small time for the first ADC/DMA sample to arrive, then
-   * check battery voltage immediately to avoid long waits during
-   * wheel/encoder calibration when battery is already too low.
-   */
-  HAL_Delay(20);
-  /* If HARD_18V_ENABLE is enabled, compute the lower of BAT_DEAD and HARD_18V threshold
-   * and power off if the measured ADC count is below that value.
-   */
-  const int32_t hard_lower = (HARD_18V_COUNTS < (int32_t)BAT_DEAD) ? HARD_18V_COUNTS : (int32_t)BAT_DEAD;
-  if ((int32_t)adc_buffer.adc3.value.batt1 < hard_lower){
-    /* Immediately release power latch and stop initialization */
-    poweroff();
-  }
-#endif
-
-
   poweronMelody();
-  HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
+  #if defined(DC_LINK_WATCHDOG_ENABLE)
+  DcLinkWatchdog_Init();
+  #endif
   
 #if defined(ENABLE_BOARD_TEMP_SENSOR)
   int32_t board_temp_adcFixdt = adc_buffer.adc12.value.temp << 16;  // Fixed-point filter output initialized with current ADC converted to fixed-point
@@ -318,11 +320,11 @@ int main(void) {
         Encoder_Y_Align(); // Process alignment state machine
       }
     #endif
-    if (buzzerTimer - buzzerTimer_prev > 16*DELAY_IN_MAIN_LOOP) {   // 1 ms = 16 ticks buzzerTimer
+        
 
+    if (buzzerTimer - buzzerTimer_prev > 16*DELAY_IN_MAIN_LOOP) {   // 1 ms = 16 ticks buzzerTimer
     readCommand();                        // Read Command: input1[inIdx].cmd, input2[inIdx].cmd
     calcAvgSpeed();                       // Calculate average measured speed: speedAvg, speedAvgAbs
-  
     #ifndef VARIANT_TRANSPOTTER
       // ####### MOTOR ENABLING: Only if the initial input is very small (for SAFETY) #######
       if (enable == 0 && !rtY_Left.z_errCode && !rtY_Right.z_errCode && 
@@ -382,15 +384,54 @@ int main(void) {
           }
         }
       #endif
+     #if defined(CONTROL_PPM_LEFT) || defined(CONTROL_PPM_RIGHT)
+      if(ppm_ready) {
+        calc_ppm();
+      }
+     #endif
+
+      #if defined(RC_PWM_LEFT) || defined(RC_PWM_RIGHT)
+     
+        if(rc_pwm_ready_ch1) {
+         calc_rc_pwm_ch1();
+      }
+        if(rc_pwm_ready_ch2){
+         calc_rc_pwm_ch2();
+      }
+      #endif
+
+      #if defined(HW_PWM)
+      if(hw_pwm_ready) {
+        calc_hw_pwm();
+      }
+      #endif
+
+     #if defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)
+     
+        if(sw_pwm_ready_ch1) {
+        calc_sw_pwm_ch1();
+      }
+        if(sw_pwm_ready_ch2){
+        calc_sw_pwm_ch2();
+      }
+      #endif
 
       // ####### LOW-PASS FILTER #######
+     #if !defined(SW_PWM_RIGHT) && !defined(SW_PWM_LEFT) && !defined(HW_PWM)
       rateLimiter16(input1[inIdx].cmd, rate, &steerRateFixdt);
       rateLimiter16(input2[inIdx].cmd, rate, &speedRateFixdt);
       filtLowPass32(steerRateFixdt >> 4, FILTER, &steerFixdt);
-      filtLowPass32(speedRateFixdt >> 4, FILTER, &speedFixdt);
+      filtLowPass32(speedRateFixdt >> 4 , FILTER, &speedFixdt);
       steer = (int16_t)(steerFixdt >> 16);  // convert fixed-point to integer
       speed = (int16_t)(speedFixdt >> 16);  // convert fixed-point to integer
-
+       #else
+      rateLimiter16(input1[inIdx].cmd, rate, &steerRateFixdt);
+      rateLimiter16(input2[inIdx].cmd, rate, &speedRateFixdt);
+      filtLowPass32(steerRateFixdt, FILTER, &steerFixdt);
+      filtLowPass32(speedRateFixdt, FILTER, &speedFixdt);
+      steer = (int16_t)(steerFixdt >> 16);  // convert fixed-point to integer
+      speed = (int16_t)(speedFixdt >> 16);  // convert fixed-point to integer
+       #endif
       // ####### VARIANT_HOVERCAR #######
       #ifdef VARIANT_HOVERCAR
       if (inIdx == CONTROL_ADC) {               // Only use use implementation below if pedals are in use (ADC input)
@@ -624,7 +665,8 @@ int main(void) {
       poweroff();
     } else
 #endif
-    if ( BAT_DEAD_ENABLE && batVoltage < BAT_DEAD && speedAvgAbs < 20){
+
+    if ( BAT_DEAD_ENABLE && (batVoltage < BAT_DEAD || batVoltage < HARD_18V_COUNTS) && speedAvgAbs < 20){
       #if defined(DEBUG_SERIAL_USART2) || defined(DEBUG_SERIAL_USART3)
         printf("Powering off, battery voltage is too low\r\n");
       #endif
@@ -658,9 +700,15 @@ int main(void) {
     inactivity_timeout_counter++;
 
     // ####### INACTIVITY TIMEOUT #######
+    #if !defined(SW_PWM_RIGHT) && !defined(SW_PWM_LEFT) && !defined(HW_PWM)
     if (abs(cmdL) > 50 || abs(cmdR) > 50) {
       inactivity_timeout_counter = 0;
     }
+    #else
+     if (abs(cmdL) > 800 || abs(cmdR) > 800) {
+      inactivity_timeout_counter = 0;
+    }
+    #endif
 
     #if defined(CRUISE_CONTROL_SUPPORT) || defined(STANDSTILL_HOLD_ENABLE)
       if ((abs(rtP_Left.n_cruiseMotTgt)  > 50 && rtP_Left.b_cruiseCtrlEna) || 
@@ -685,7 +733,6 @@ int main(void) {
     }
   }
 }
-
 
 // ===========================================================
 /** System Clock Configuration
@@ -781,7 +828,6 @@ void SystemClock_Config(void) {
   HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK); //0x00000004U
 
   /* SysTick_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
 }
 
 

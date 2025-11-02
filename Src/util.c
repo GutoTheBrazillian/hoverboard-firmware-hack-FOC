@@ -56,6 +56,8 @@ extern int16_t batVoltage;
 extern uint8_t backwardDrive;
 extern uint8_t buzzerCount;             // global variable for the buzzer counts. can be 1, 2, 3, 4, 5, 6, 7...
 extern volatile uint32_t buzzerTimer;   // global timer variable for buzzer timing
+static volatile uint8_t dcLinkProtection = false;
+static volatile boolean_T overcurrent_fault_flag = false;
 
 #if defined(ANALOG_BUTTON)
 volatile uint8_t analogButtonPressed = 0U;
@@ -92,25 +94,15 @@ void AnalogButton_Init(void) {
 #endif
 
 #if defined(DC_LINK_WATCHDOG_ENABLE)
+extern ADC_HandleTypeDef hadc1;
+extern ADC_HandleTypeDef hadc2;
 extern ADC_HandleTypeDef hadc3;
-
-static volatile uint8_t dcLinkOverVoltage = 0U;
 
 static void DcLinkWatchdog_ArmRise(void) {
   ADC_AnalogWDGConfTypeDef config;
   config.WatchdogMode = ADC_ANALOGWATCHDOG_SINGLE_REG;
-  config.HighThreshold = DC_LINK_OVERVOLTAGE_HIGH_COUNTS;
-  config.LowThreshold  = DC_LINK_OVERVOLTAGE_LOW_COUNTS;
-  config.Channel       = DCLINK_ADC_CHANNEL;
-  config.ITMode        = ENABLE;
-  HAL_ADC_AnalogWDGConfig(&hadc3, &config);
-}
-
-static void DcLinkWatchdog_ArmRecovery(void) {
-  ADC_AnalogWDGConfTypeDef config;
-  config.WatchdogMode = ADC_ANALOGWATCHDOG_SINGLE_REG;
-  config.HighThreshold = 0x0FFFU;
-  config.LowThreshold  = DC_LINK_OVERVOLTAGE_LOW_COUNTS;
+  config.HighThreshold = BAT_HIGH;
+  config.LowThreshold  = HARD_18V_COUNTS-200;   // around 15v
   config.Channel       = DCLINK_ADC_CHANNEL;
   config.ITMode        = ENABLE;
   HAL_ADC_AnalogWDGConfig(&hadc3, &config);
@@ -118,43 +110,53 @@ static void DcLinkWatchdog_ArmRecovery(void) {
 
 static void DcLinkWatchdog_HandleWatchdog(void) {
   __HAL_ADC_CLEAR_FLAG(&hadc3, ADC_FLAG_AWD);
-
-  uint16_t sample = adc_buffer.adc3.value.batt1;
-
-  if (!dcLinkOverVoltage) {
-    if (sample >= DC_LINK_OVERVOLTAGE_HIGH_COUNTS) {
-      dcLinkOverVoltage = 1U;
-      DcLinkWatchdog_ArmRecovery();
-    } else {
-      DcLinkWatchdog_ArmRise();
+  //uint16_t sample = adc_buffer.adc3.value.batt1;
+      dcLinkProtection = true;
+      LEFT_TIM->BDTR &= ~TIM_BDTR_MOE;
+      RIGHT_TIM->BDTR &= ~TIM_BDTR_MOE;
     }
-  } else {
-    if (sample <= DC_LINK_OVERVOLTAGE_LOW_COUNTS) {
-      dcLinkOverVoltage = 0U;
-      DcLinkWatchdog_ArmRise();
-    } else {
-      DcLinkWatchdog_ArmRecovery();
-    }
-  }
-}
 
 void DcLinkWatchdog_Init(void) {
-  dcLinkOverVoltage = 0U;
+  dcLinkProtection = false;
   __HAL_ADC_CLEAR_FLAG(&hadc3, ADC_FLAG_AWD);
   DcLinkWatchdog_ArmRise();
 }
 
-uint8_t DcLinkOverVoltageActive(void) {
-  return dcLinkOverVoltage;
-}
+
 
 void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *hadc) {
   if ((hadc != NULL) && (hadc == &hadc3 || hadc->Instance == hadc3.Instance)) {
     DcLinkWatchdog_HandleWatchdog();
+    return;
+  }
+  // ADC1/ADC2 analog watchdog: immediate motor disable
+  // ADC1 -> right DC sensor (PC1 / ADC_CHANNEL_11)
+  // ADC2 -> left  DC sensor (PC0 / ADC_CHANNEL_10)
+  // Clear AWD flag and disable motors via MOE bits, then set global enable=0 so
+   
+  if ((hadc != NULL) && (hadc == &hadc1 || hadc->Instance == hadc1.Instance)) {
+    __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_AWD);
+  LEFT_TIM->BDTR &= ~TIM_BDTR_MOE;
+  RIGHT_TIM->BDTR &= ~TIM_BDTR_MOE;
+  overcurrent_fault_flag = true;
+    return;
+  }
+
+  if ((hadc != NULL) && (hadc == &hadc2 || hadc->Instance == hadc2.Instance)) {
+    __HAL_ADC_CLEAR_FLAG(&hadc2, ADC_FLAG_AWD);
+  LEFT_TIM->BDTR &= ~TIM_BDTR_MOE;
+  RIGHT_TIM->BDTR &= ~TIM_BDTR_MOE;
+  overcurrent_fault_flag = true;
+    return;
   }
 }
 #endif
-
+boolean_T overcurrent_fault(void) {
+  return overcurrent_fault_flag;
+}
+boolean_T  DLVPA(void) {
+  return dcLinkProtection;
+}
 // Shared accessor used by the rest of the firmware regardless of button mode.
 uint8_t powerButtonPressed(void) {
 #if defined(ANALOG_BUTTON)
@@ -196,42 +198,8 @@ static inline boolean_T encoder_alignment_active(void) {
   return (encoder_y.align_state != 0U);
 #endif
 }
-#define ENCODER_ALIGN_ELEC_TOL_DEG 360
-
-static int32_t normalize_to_cycle(int32_t value, int32_t cycle) {
-  if (cycle <= 0) {
-    return 0;
-  }
-
-  int32_t result = value % cycle;
-  if (result < 0) {
-    result += cycle;
-  }
-
-  return result;
-}
-
-static int32_t compute_alignment_error_deg(int32_t expected_count,
-                                           int32_t actual_count,
-                                           int32_t cycle) {
-  if (cycle <= 0) {
-    return 360; //flag a fatal configuration issue
-  }
-
-  int32_t expected_elec = normalize_to_cycle(expected_count, cycle);
-  int32_t actual_elec   = normalize_to_cycle(actual_count, cycle);
-  int32_t elec_error    = actual_elec - expected_elec;
-  int32_t half_cycle    = cycle / 2;
-
-  if (elec_error > half_cycle) {
-    elec_error -= cycle;
-  } else if (elec_error < -half_cycle) {
-    elec_error += cycle;
-  }
-
-  return (elec_error * 360) / cycle;
-}
 #endif
+
 extern uint8_t buzzerFreq;              // global variable for the buzzer pitch. can be 1, 2, 3, 4, 5, 6, 7...
 extern uint8_t buzzerPattern;           // global variable for the buzzer pattern. can be 1, 2, 3, 4, 5, 6, 7...
 
@@ -444,6 +412,11 @@ void BLDC_Init(void) {
   rtP_Left.a_phaAdvMax          = PHASE_ADV_MAX << 4;                   // fixdt(1,16,4)
   rtP_Left.r_fieldWeakHi        = FIELD_WEAK_HI << 4;                   // fixdt(1,16,4)
   rtP_Left.r_fieldWeakLo        = FIELD_WEAK_LO << 4;                   // fixdt(1,16,4)
+  rtP_Left.n_polePairs          = N_POLE_PAIRS;                        // fixdt(1,16,4)
+  //rtP_Left.cf_idKi              = DI;                              // fixdt(1,16,4) ufix16_En16
+  //rtP_Left.cf_idKp              = DP;                              // fixdt(1,16,4) ufix16_En12
+  //rtP_Left.cf_iqKi              = DQ;                              // fixdt(1,16,4) ufix16_En16
+  //rtP_Left.cf_iqKp              = DQ;                              // fixdt(1,16,4) ufix16_En12
 
   rtP_Right                     = rtP_Left;     // Copy the Left motor parameters to the Right motor parameters
   rtP_Right.z_selPhaCurMeasABC  = 1;            // Right motor measured current phases {Green, Blue} = {iA, iB} -> do NOT change
@@ -464,7 +437,7 @@ void BLDC_Init(void) {
   BLDC_controller_initialize(rtM_Left);
   BLDC_controller_initialize(rtM_Right);
 }
-
+#if !defined(SW_PWM_RIGHT) && !defined(SW_PWM_LEFT) && !defined(HW_PWM)
 void Input_Lim_Init(void) {     // Input Limitations - ! Do NOT touch !
   if (rtP_Left.b_fieldWeakEna || rtP_Right.b_fieldWeakEna) {
     INPUT_MAX = MAX( 1000, FIELD_WEAK_HI);
@@ -474,6 +447,17 @@ void Input_Lim_Init(void) {     // Input Limitations - ! Do NOT touch !
     INPUT_MIN = -1000;
   }
 }
+#else
+void Input_Lim_Init(void) {     // Input Limitations - ! Do NOT touch !
+  if (rtP_Left.b_fieldWeakEna || rtP_Right.b_fieldWeakEna) {
+    INPUT_MAX = MAX( 16000, FIELD_WEAK_HI);
+    INPUT_MIN = MIN(-16000,-FIELD_WEAK_HI);
+  } else {
+    INPUT_MAX =  16000;
+    INPUT_MIN = -16000;
+  }
+}
+#endif
 
 void Input_Init(void) {
   #if defined(CONTROL_PPM_LEFT) || defined(CONTROL_PPM_RIGHT)
@@ -673,16 +657,12 @@ void Encoder_X_Init(void) {
   encoder_x.offset = 0;
   encoder_x.direction = 1;
   encoder_x.aligned_count = 0;
-  encoder_x.mech_angle_deg = 0;
+  encoder_x.ENCODER_COUNT = 0;
     
     // Initialize alignment state variables
   encoder_x.align_state = 0;
   encoder_x.align_ini_pos = 0;
 }
-
-
-
-
 void Encoder_X_Align_Start(void) {
   if (encoder_x.align_state != 0) {
         return; 
@@ -701,11 +681,9 @@ void Encoder_X_Align_Start(void) {
   encoder_x.align_start_time = buzzerTimer;
   encoder_x.align_ini_pos = encoder_x_handle.Instance->CNT;
     // Initialize simulation variables
-  encoder_x.power_ramp_timer = buzzerTimer;
-    
   // Calculate count increment for 5.256 electrical rotations in 3000ms (5 + 92°/360°)
   // This compensates for the electrical offset to naturally reach 0° electrical  
-  // 5.256 electrical rotations = 5.256/15 mechanical rotations = 0.3504 mechanical rotation
+  // 5.256 electrical rotations = 5.256/N_POLE_PAIRS mechanical rotations = 0.3504 mechanical rotation
   // 0.3504 mech rotation = (0.3504 * ENCODER_X_CPR) counts over 3000ms
   // Timebase: buzzerTimer runs at 16 ticks/ms -> total ticks = 3000 * 16 = 48000
   // Increment per tick = (0.3504 * ENCODER_Y_CPR) / 48000
@@ -725,117 +703,131 @@ void Encoder_X_Align_Start(void) {
 
 // Non-blocking encoder alignment with mechanical angle simulation - call from main loop
 void Encoder_X_Align(void) {
-    
-  uint32_t current_time = buzzerTimer;
-  uint32_t elapsed_ticks = current_time - encoder_x.align_start_time;   // in ticks
-  uint32_t ramp_ticks    = current_time - encoder_x.power_ramp_timer;   // in ticks
+    uint32_t current_time = buzzerTimer;
+    uint32_t elapsed_ticks = current_time - encoder_x.align_start_time;
+    encoder_x.ENCODER_COUNT = encoder_x_handle.Instance->CNT;
+    const uint32_t RAMP_MS = T_MS(125);
+    const uint32_t MOVE_MS = T_MS(1500);
     
     switch (encoder_x.align_state) {
-   
-            
-        case 1: // Rotation phase - 5.167 electrical rotations in 3 seconds, end at 0° electrical
-            // Smooth deceleration in last 500ms to prevent sudden stop
-            if (ramp_ticks < T_MS(250)) {
-                // Linear ramp: target = (ALIGNMENT_X_POWER * ramp_ticks) / T_MS(500)
-        encoder_x.align_inpTgt = (int16_t)((ALIGNMENT_X_POWER * ramp_ticks) / T_MS(250));
-            } else if (elapsed_ticks < T_MS(1250)) {
-                // Full speed rotation for first 1 seconds
-        encoder_x.align_inpTgt = ALIGNMENT_X_POWER;
-            } else if (elapsed_ticks < T_MS(1500)) {
-                // Smooth deceleration over last 250ms
-                uint32_t decel_ticks = elapsed_ticks - T_MS(1250);
-        encoder_x.align_inpTgt = (int16_t)(ALIGNMENT_X_POWER - (ALIGNMENT_X_POWER * decel_ticks) / T_MS(250));
-            }
-
-            // Calculate emulated position increment
-            if (elapsed_ticks < T_MS(1500)) {
-                // count_increment_x1000 is per tick * 1000
-        int32_t total_increment = (int32_t)(((int64_t)encoder_x.count_increment_x1000 * (int64_t)elapsed_ticks) / 1000);
-        encoder_x.emulated_mech_count = encoder_x.align_ini_pos + total_increment;
-                
-                // Handle encoder wraparound
-        encoder_x.emulated_mech_count = (encoder_x.emulated_mech_count % (int32_t)ENCODER_X_CPR + (int32_t)ENCODER_X_CPR) % (int32_t)ENCODER_X_CPR;
-            } else {
-                // 3 seconds completed, snap to 30° electrical instead of 0°
-                // Each electrical rotation = 360°/15 pole pairs = 24° mechanical
-                // 30° electrical = 30°/360° * 24° = 2° mechanical
-    int32_t counts_per_elec_cycle = ENCODER_X_CPR / 15; // Counts per electrical rotation
-    int32_t counts_per_degree = ENCODER_X_CPR / 360;    // Counts per mechanical degree
-    int32_t offset_30_elec = 2 * counts_per_degree+5;  // 30° elec = 2° mech
-                
-    int32_t current_elec_cycle = encoder_x.emulated_mech_count / counts_per_elec_cycle;
-    encoder_x.emulated_mech_count = current_elec_cycle * counts_per_elec_cycle + offset_30_elec; // Snap to 30° electrical
-                
-                // Handle encoder wraparound after adding offset
-    encoder_x.emulated_mech_count = (encoder_x.emulated_mech_count % (int32_t)ENCODER_X_CPR + (int32_t)ENCODER_X_CPR) % (int32_t)ENCODER_X_CPR;
-                
-                // Move to centering state
-    encoder_x.align_state = 3;
-    encoder_x.power_ramp_timer = current_time;   // start high-power ramp timer
-            }
+        case 1: // Rotation phase - spin to find position
+            handle_x_rotation_phase(elapsed_ticks, RAMP_MS, MOVE_MS, current_time);
             break;
             
-        case 3: // High power phase - double current slowly in 500ms, hold 500ms, then measure
-            // Calculate power ramp time for this phase
-      if (ramp_ticks < T_MS(250)) {
-                // Ramp from ALIGNMENT_X_POWER to 2*ALIGNMENT_X_POWER over 500ms
-        int16_t power_increase = (int16_t)((ALIGNMENT_X_POWER * ramp_ticks) / T_MS(125));
-    encoder_x.align_inpTgt = power_increase;
-      } else if (ramp_ticks < T_MS(1000)) {
-        // Hold at double power for another 500ms
-  encoder_x.align_inpTgt = ALIGNMENT_X_POWER * 2;
-      } else {
-        // Record real position and calculate offset, then stop
-  int32_t final_real_count = encoder_x_handle.Instance->CNT;
-  encoder_x.align_inpTgt = 0;  
-                
-                // Determine direction based on encoder movement during alignment
-    int encoder_movement = encoder_x.align_ini_pos - final_real_count;
-                  //if (encoder_movement > (ENCODER_X_CPR/2)) encoder_movement -= (ENCODER_X_CPR);
-                 // if (encoder_movement < -(ENCODER_X_CPR/2)) encoder_movement += (ENCODER_X_CPR);
-                // Determine direction: 1 if positive movement (CW), 0 if negative (CCW)
-    encoder_x.direction = (encoder_movement > 0) ? 1 : 0;
-    
-                // Calculate offset: difference between emulated and real position
-    encoder_x.offset = encoder_x.emulated_mech_count - final_real_count;
-encoder_x.offset = (encoder_x.offset % (int32_t)ENCODER_X_CPR + (int32_t)ENCODER_X_CPR) % (int32_t)ENCODER_X_CPR;
-if (encoder_x.offset > (int32_t)(ENCODER_X_CPR / 2))   { encoder_x.offset -= (int32_t)ENCODER_X_CPR; }
-if (encoder_x.offset < -(int32_t)(ENCODER_X_CPR / 2))  { encoder_x.offset += (int32_t)ENCODER_X_CPR; }
-__HAL_TIM_SET_COUNTER(&encoder_x_handle, encoder_x.emulated_mech_count);
-              
-                
-        int32_t counts_per_elec_cycle = ENCODER_X_CPR / 15; // Counts per electrical rotation (360° elec)
-        int32_t elec_diff_degrees = compute_alignment_error_deg(encoder_x.emulated_mech_count,
-                                    final_real_count,
-                                    counts_per_elec_cycle);
-        boolean_T alignment_error = (elec_diff_degrees > ENCODER_ALIGN_ELEC_TOL_DEG) ||
-                      (elec_diff_degrees < -ENCODER_ALIGN_ELEC_TOL_DEG);
-
-        if (alignment_error) {
-          encoder_x.align_fault = true;
-          buzzerCount = 0;
-          buzzerFreq = 50; // Error tone
-          buzzerPattern = 0b11110000; // Error pattern
-          encoder_x.ali = false;
-        } else {
-          encoder_x.align_fault = false;
-          encoder_x.ali = true;
-        }
-
-                
-                encoder_x.align_state = 0; // Reset state machine
-                
-                
-                //rtP_Left.b_diagEna = DIAG_ENA; // Re-enable diagnostics
-            }
+        case 2: // High power phase - apply extra torque
+            handle_x_high_power_phase(elapsed_ticks, RAMP_MS, current_time);
+            break;
+            
+        case 3: // Move back and finish
+            handle_x_move_back_phase(elapsed_ticks, RAMP_MS, MOVE_MS, current_time);
             break;
             
         default:
-            encoder_x.align_state = 0; // Reset on invalid state
+            encoder_x.align_state = 0;
             break;
     }
 }
 
+ void handle_x_rotation_phase(uint32_t elapsed_ticks, uint32_t ramp_ms, uint32_t move_ms, uint32_t current_time) {
+    // Power control: ramp up, full speed, then ramp down
+    if (elapsed_ticks < ramp_ms) {
+        // Ramp up to full power
+        encoder_x.align_inpTgt = (ALIGNMENT_X_POWER * elapsed_ticks) / ramp_ms;
+    } else if (elapsed_ticks < (move_ms-ramp_ms)) {
+        // Full power rotation
+        encoder_x.align_inpTgt = ALIGNMENT_X_POWER;
+    } else if (elapsed_ticks < move_ms) {
+        // Ramp down to stop
+        uint32_t decel_ticks = elapsed_ticks - (move_ms-ramp_ms);
+        encoder_x.align_inpTgt = ALIGNMENT_X_POWER - (ALIGNMENT_X_POWER * decel_ticks) / ramp_ms;
+    }
+
+    // Update emulated encoder position during movement
+    if (elapsed_ticks < move_ms) {
+        int32_t total_increment = ((int64_t)encoder_x.count_increment_x1000 * elapsed_ticks) / 1000;
+    encoder_x.emulated_mech_count = encoder_x.align_ini_pos + total_increment;
+    encoder_x.emulated_mech_count = normalize_x_encoder_count(encoder_x.emulated_mech_count);
+    } else {
+        // Rotation complete - snap to 30° electrical position
+        int32_t counts_per_elec_cycle = ENCODER_X_CPR / N_POLE_PAIRS;
+         encoder_x.offset = (2 * ENCODER_X_CPR / 360)+1;
+
+        int32_t current_elec_cycle = encoder_x.emulated_mech_count / counts_per_elec_cycle;
+        encoder_x.emulated_mech_count = current_elec_cycle * counts_per_elec_cycle+encoder_x.offset;
+        encoder_x.emulated_mech_count = normalize_x_encoder_count(encoder_x.emulated_mech_count);
+
+        encoder_x.align_state = 2;
+        encoder_x.align_start_time = current_time;
+    }
+}
+
+ void handle_x_high_power_phase(uint32_t elapsed_ticks, uint32_t ramp_ms, uint32_t current_time) {
+    if (elapsed_ticks < ramp_ms) {
+        // Ramp to double power
+        encoder_x.align_inpTgt = (2*ALIGNMENT_X_POWER * elapsed_ticks) / ramp_ms;
+    } else if (elapsed_ticks < T_MS(1000)) {
+        // Hold at double power
+        encoder_x.align_inpTgt = ALIGNMENT_X_POWER * 2;
+    } else {
+        
+         // Calculate direction
+       int32_t movement = encoder_x.align_ini_pos - encoder_x_handle.Instance->CNT;
+       encoder_x.direction = (movement > 0) ? 1 : 0;
+    // Record final position and move to next phase
+    
+        __HAL_TIM_SET_COUNTER(&encoder_x_handle, encoder_x.emulated_mech_count+encoder_x.offset); //add a bit of offset to for anticogging
+        encoder_x.align_zero_pos = encoder_x_handle.Instance->CNT;
+        encoder_x.align_start_time = current_time;
+        encoder_x.align_state = 3;
+    }
+}
+
+ void handle_x_move_back_phase(uint32_t elapsed_ticks, uint32_t ramp_ms, uint32_t move_ms, uint32_t current_time) {
+    // Stage A: Ramp down from high power to normal power
+    if (elapsed_ticks < ramp_ms) {
+        uint32_t decel_ticks = (move_ms-ramp_ms) - elapsed_ticks;
+        encoder_x.align_inpTgt = ALIGNMENT_X_POWER + (ALIGNMENT_X_POWER * decel_ticks) / ramp_ms;
+    }
+    // Stage B: Move emulated position back toward start
+    else if (elapsed_ticks < move_ms) {
+        int32_t delta = encoder_x.align_zero_pos - encoder_x.align_ini_pos ;
+    
+    // Find shortest path (handle encoder wrap-around)
+       if (delta > (ENCODER_X_CPR / 2)) delta -= ENCODER_X_CPR;
+       if (delta < -(ENCODER_X_CPR / 2)) delta += ENCODER_X_CPR;
+    // Interpolate position
+        int32_t moved = (delta * (elapsed_ticks - ramp_ms)) / (move_ms - ramp_ms);
+        encoder_x.emulated_mech_count = encoder_x.align_zero_pos - moved;
+        encoder_x.emulated_mech_count = normalize_x_encoder_count(encoder_x.emulated_mech_count);
+
+        encoder_x.align_inpTgt = ALIGNMENT_X_POWER;
+    }
+    // Stage C: Final ramp down to zero and finish
+    else if (elapsed_ticks >= move_ms) {
+        uint32_t final_ramp_time = elapsed_ticks - move_ms;
+        if (final_ramp_time < ramp_ms) {
+            encoder_x.align_inpTgt = ALIGNMENT_X_POWER * (ramp_ms - final_ramp_time) / ramp_ms;
+        } else {
+            encoder_x.align_inpTgt = 0;
+            finalize_x_alignment();
+        }
+    }
+}
+
+  int32_t normalize_x_encoder_count(int32_t count) {
+    count %= ENCODER_X_CPR;
+    if (count < 0) count += ENCODER_X_CPR;
+    return count;
+}
+
+ void finalize_x_alignment(void) {
+    // Calculate offset
+
+        encoder_x.align_fault = false;
+        encoder_x.ali = true;
+        rtP_Right.b_diagEna = DIAG_ENA;
+        encoder_x.align_state = 0;
+}
 #endif // ENCODER_X
 
 #if defined (ENCODER_Y)
@@ -932,7 +924,7 @@ void Encoder_Y_Align_Start(void) {
   // Increment per tick = (0.3504 * ENCODER_Y_CPR) / 48000
   // Store as per-tick * 1000 for precision: (0.3504 * ENCODER_Y_CPR * 1000) / 48000
   // Using integer math: (3504 * ENCODER_Y_CPR * 1000) / (10000 * 48000) = (3504 * ENCODER_Y_CPR) / 480000
-  encoder_y.count_increment_x1000 = (int32_t)((((int64_t)3504) * ENCODER_Y_CPR) / 480000);
+  encoder_y.count_increment_x1000 = (int32_t)((((int64_t)280) * ENCODER_Y_CPR) / 480000);
     
     
     encoder_y.align_inpTgt = 0; // Start with 0 power, will ramp up
@@ -946,114 +938,129 @@ void Encoder_Y_Align_Start(void) {
 
 // Non-blocking encoder alignment with mechanical angle simulation - call from main loop
 void Encoder_Y_Align(void) {
+    uint32_t current_time = buzzerTimer;
+    uint32_t elapsed_ticks = current_time - encoder_y.align_start_time;
     
-  uint32_t current_time = buzzerTimer;
-  uint32_t elapsed_ticks = current_time - encoder_y.align_start_time;   // in ticks
-  uint32_t ramp_ticks    = current_time - encoder_y.power_ramp_timer;   // in ticks
+    const uint32_t RAMP_MS = T_MS(125);
+    const uint32_t MOVE_MS = T_MS(1500);
     
     switch (encoder_y.align_state) {
-   
-            
-        case 1: // Rotation phase - 5.167 electrical rotations in 3 seconds, end at 0° electrical
-            // Smooth deceleration in last 500ms to prevent sudden stop
-            if (ramp_ticks < T_MS(250)) {
-                // Linear ramp: target = (ALIGNMENT_Y_POWER * ramp_ticks) / T_MS(500)
-        encoder_y.align_inpTgt = (int16_t)((ALIGNMENT_Y_POWER * ramp_ticks) / T_MS(250));
-            } else if (elapsed_ticks < T_MS(1250)) {
-                // Full speed rotation for first 1 seconds
-        encoder_y.align_inpTgt = ALIGNMENT_Y_POWER;
-            } else if (elapsed_ticks < T_MS(1500)) {
-                // Smooth deceleration over last 250ms
-                uint32_t decel_ticks = elapsed_ticks - T_MS(1250);
-        encoder_y.align_inpTgt = (int16_t)(ALIGNMENT_Y_POWER - (ALIGNMENT_Y_POWER * decel_ticks) / T_MS(250));
-            }
-            
-            if (elapsed_ticks < T_MS(1500)) {
-                // Calculate emulated position increment
-                // count_increment_x1000 is per tick * 1000
-        int32_t total_increment = (int32_t)(((int64_t)encoder_y.count_increment_x1000 * (int64_t)elapsed_ticks) / 1000);
-        encoder_y.emulated_mech_count = encoder_y.align_ini_pos + total_increment;
-                
-                // Handle encoder wraparound
-        encoder_y.emulated_mech_count = (encoder_y.emulated_mech_count % (int32_t)ENCODER_Y_CPR + (int32_t)ENCODER_Y_CPR) % (int32_t)ENCODER_Y_CPR;
-            } else {
-                // 3 seconds completed, snap to 30° electrical instead of 0°
-                // Each electrical rotation = 360°/15 pole pairs = 24° mechanical
-                // 30° electrical = 30°/360° * 24° = 2° mechanical
-        int32_t counts_per_elec_cycle = ENCODER_Y_CPR / 15; // Counts per electrical rotation
-        int32_t counts_per_degree = ENCODER_Y_CPR / 360;    // Counts per mechanical degree
-        int32_t offset_30_elec = 2 * counts_per_degree+5;  // 30° elec = 2° mech
-                
-        int32_t current_elec_cycle = encoder_y.emulated_mech_count / counts_per_elec_cycle;
-        encoder_y.emulated_mech_count = current_elec_cycle * counts_per_elec_cycle + offset_30_elec; // Snap to 30° electrical
-                
-                // Handle encoder wraparound after adding offset
-        encoder_y.emulated_mech_count = (encoder_y.emulated_mech_count % (int32_t)ENCODER_Y_CPR + (int32_t)ENCODER_Y_CPR) % (int32_t)ENCODER_Y_CPR;
-                
-                // Move to centering state
-        encoder_y.align_state = 3;
-        encoder_y.power_ramp_timer = current_time;   // start high-power ramp timer
-            }
+        case 1: // Rotation phase - spin to find position
+            handle_y_rotation_phase(elapsed_ticks, RAMP_MS, MOVE_MS, current_time);
             break;
             
-        case 3: // High power phase - double current slowly in 500ms, hold 500ms, then measure
-            // Calculate power ramp time for this phase
-      if (ramp_ticks < T_MS(250)) {
-                // Ramp from ALIGNMENT_Y_POWER to 2*ALIGNMENT_Y_POWER over 500ms
-  int16_t power_increase = (int16_t)((ALIGNMENT_Y_POWER * ramp_ticks) / T_MS(125));
-    encoder_y.align_inpTgt = power_increase;
-      } else if (ramp_ticks < T_MS(1000)) {
-        // Hold at double power for another 500ms
-  encoder_y.align_inpTgt = ALIGNMENT_Y_POWER * 2;
-      } else {
-        // Record real position and calculate offset, then stop
-  int32_t final_real_count = encoder_y_handle.Instance->CNT;
-  encoder_y.align_inpTgt = 0;
-                
-                // Determine direction based on encoder movement during alignment
-    int encoder_movement = encoder_y.align_ini_pos - final_real_count;
-                  //if (encoder_movement > (ENCODER_Y_CPR/2)) encoder_movement -= (ENCODER_Y_CPR);
-                 // if (encoder_movement < -(ENCODER_Y_CPR/2)) encoder_movement += (ENCODER_Y_CPR);
-                // Determine direction: 1 if positive movement (CW), 0 if negative (CCW)
-    encoder_y.direction = (encoder_movement > 0) ? 1 : 0;
-    
-                // Calculate offset: difference between emulated and real position
-         encoder_y.offset = encoder_y.emulated_mech_count - final_real_count;
-         encoder_y.offset = (encoder_y.offset % (int32_t)ENCODER_Y_CPR + (int32_t)ENCODER_Y_CPR) % (int32_t)ENCODER_Y_CPR;
-         if (encoder_y.offset > (ENCODER_Y_CPR/2)) {encoder_y.offset -= (ENCODER_Y_CPR);}
-         if (encoder_y.offset < -(ENCODER_Y_CPR/2)) {encoder_y.offset += (ENCODER_Y_CPR);}
-                
-    __HAL_TIM_SET_COUNTER(&encoder_y_handle, encoder_y_handle.Instance->CNT+encoder_y.offset);
-
-
-        int32_t counts_per_elec_cycle = ENCODER_Y_CPR / 15; // Counts per electrical rotation (360° elec)
-        int32_t elec_diff_degrees = compute_alignment_error_deg(encoder_y.emulated_mech_count,
-                                    final_real_count,
-                                    counts_per_elec_cycle);
-        boolean_T alignment_error = (elec_diff_degrees > ENCODER_ALIGN_ELEC_TOL_DEG) ||
-                      (elec_diff_degrees < -ENCODER_ALIGN_ELEC_TOL_DEG);
-
-        if (alignment_error) {
-          encoder_y.align_fault = true;
-          buzzerCount = 0;
-          buzzerFreq = 50; // Error tone
-          buzzerPattern = 0b11110000; // Error pattern
-          encoder_y.ali = false;
-        } else {
-          encoder_y.align_fault = false;
-          encoder_y.ali = true;
-        }
-                encoder_y.align_state = 0; // Reset state machine
-                
-                
-                
-            }
+        case 2: // High power phase - apply extra torque
+            handle_y_high_power_phase(elapsed_ticks, RAMP_MS, current_time);
+            break;
+            
+        case 3: // Move back and finish
+            handle_y_move_back_phase(elapsed_ticks, RAMP_MS, MOVE_MS, current_time);
             break;
             
         default:
-      encoder_y.align_state = 0; // Reset on invalid state
+            encoder_y.align_state = 0;
             break;
     }
+}
+
+ void handle_y_rotation_phase(uint32_t elapsed_ticks, uint32_t ramp_ms, uint32_t move_ms, uint32_t current_time) {
+    // Power control: ramp up, full speed, then ramp down
+    if (elapsed_ticks < ramp_ms) {
+        // Ramp up to full power
+        encoder_y.align_inpTgt = (ALIGNMENT_Y_POWER * elapsed_ticks) / ramp_ms;
+    } else if (elapsed_ticks < (move_ms-ramp_ms)) {
+        // Full power rotation
+        encoder_y.align_inpTgt = ALIGNMENT_Y_POWER;
+    } else if (elapsed_ticks < move_ms) {
+        // Ramp down to stop
+        uint32_t decel_ticks = elapsed_ticks - (move_ms-ramp_ms);
+        encoder_y.align_inpTgt = ALIGNMENT_Y_POWER - (ALIGNMENT_Y_POWER * decel_ticks) / ramp_ms;
+    }
+
+    // Update emulated encoder position during movement
+    if (elapsed_ticks < move_ms) {
+        int32_t total_increment = ((int64_t)encoder_y.count_increment_x1000 * elapsed_ticks) / 1000;
+    encoder_y.emulated_mech_count = encoder_y.align_ini_pos + total_increment;
+    encoder_y.emulated_mech_count = normalize_y_encoder_count(encoder_y.emulated_mech_count);
+    } else {
+        // Rotation complete - snap to 30° electrical position
+        int32_t counts_per_elec_cycle = ENCODER_Y_CPR / N_POLE_PAIRS;
+        encoder_y.offset = (2 * ENCODER_Y_CPR / 360)+1;  // 30° electrical = 2° mechanical + 5 counts
+    
+        int32_t current_elec_cycle = encoder_y.emulated_mech_count / counts_per_elec_cycle;
+        encoder_y.emulated_mech_count = current_elec_cycle * counts_per_elec_cycle + encoder_y.offset;
+        encoder_y.emulated_mech_count = normalize_y_encoder_count(encoder_y.emulated_mech_count);
+
+        encoder_y.align_state = 2;
+        encoder_y.align_start_time = current_time;
+    }
+}
+
+ void handle_y_high_power_phase(uint32_t elapsed_ticks, uint32_t ramp_ms, uint32_t current_time) {
+    if (elapsed_ticks < ramp_ms) {
+        // Ramp to double power
+        encoder_y.align_inpTgt = (2*ALIGNMENT_Y_POWER * elapsed_ticks) / ramp_ms;
+    } else if (elapsed_ticks < T_MS(1000)) {
+        // Hold at double power
+        encoder_y.align_inpTgt = ALIGNMENT_Y_POWER * 2;
+    } else {
+        
+         // Calculate direction
+       int32_t movement = encoder_y.align_ini_pos - encoder_y_handle.Instance->CNT;
+       encoder_y.direction = (movement > 0) ? 1 : 0;
+    // Record final position and move to next phase
+        __HAL_TIM_SET_COUNTER(&encoder_y_handle, encoder_y.emulated_mech_count + encoder_y.offset);
+        encoder_y.align_zero_pos = encoder_y_handle.Instance->CNT;
+        encoder_y.align_start_time = current_time;
+        encoder_y.align_state = 3;
+    }
+}
+
+ void handle_y_move_back_phase(uint32_t elapsed_ticks, uint32_t ramp_ms, uint32_t move_ms, uint32_t current_time) {
+    // Stage A: Ramp down from high power to normal power
+    if (elapsed_ticks < ramp_ms) {
+        uint32_t decel_ticks = (move_ms-ramp_ms) - elapsed_ticks;
+        encoder_y.align_inpTgt = ALIGNMENT_Y_POWER + (ALIGNMENT_Y_POWER * decel_ticks) / ramp_ms;
+    }
+    // Stage B: Move emulated position back toward start
+    else if (elapsed_ticks < move_ms) {
+        int32_t delta = encoder_y.align_zero_pos - encoder_y.align_ini_pos ;
+    
+    // Find shortest path (handle encoder wrap-around)
+       if (delta > (ENCODER_Y_CPR / 2)) delta -= ENCODER_Y_CPR;
+       if (delta < -(ENCODER_Y_CPR / 2)) delta += ENCODER_Y_CPR;
+    // Interpolate position
+        int32_t moved = (delta * (elapsed_ticks - ramp_ms)) / (move_ms - ramp_ms);
+        encoder_y.emulated_mech_count = encoder_y.align_zero_pos - moved;
+        encoder_y.emulated_mech_count = normalize_y_encoder_count(encoder_y.emulated_mech_count);
+
+        encoder_y.align_inpTgt = ALIGNMENT_Y_POWER;
+    }
+    // Stage C: Final ramp down to zero and finish
+    else if (elapsed_ticks >= move_ms) {
+        uint32_t final_ramp_time = elapsed_ticks - move_ms;
+        if (final_ramp_time < ramp_ms) {
+            encoder_y.align_inpTgt = ALIGNMENT_Y_POWER * (ramp_ms - final_ramp_time) / ramp_ms;
+        } else {
+            encoder_y.align_inpTgt = 0;
+            finalize_y_alignment();
+        }
+    }
+}
+
+  int32_t normalize_y_encoder_count(int32_t count) {
+    count %= ENCODER_Y_CPR;
+    if (count < 0) count += ENCODER_Y_CPR;
+    return count;
+}
+
+ void finalize_y_alignment(void) {
+    // Calculate offset
+
+        encoder_y.align_fault = false;
+        encoder_y.ali = true;
+        rtP_Right.b_diagEna = DIAG_ENA;
+        encoder_y.align_state = 0;
 }
 
 #endif // ENCODER_Y
@@ -1099,6 +1106,56 @@ void beepShortMany(uint8_t cnt, int8_t dir) {
       }
     }
 }
+
+/* ------------------ BASEPRI helper implementation ------------------ */
+/**
+ * Set BASEPRI threshold to mask interrupts whose numeric priority is
+ * greater or equal to 'prio'. The 'prio' value is the numeric
+ * priority passed to HAL_NVIC_SetPriority (0 = highest priority).
+ *
+ * Returns the previous BASEPRI raw value (call basepri_restore() with it
+ * to restore the previous mask).
+ */
+uint32_t basepri_set_threshold(uint32_t prio)
+{
+  uint32_t prev = __get_BASEPRI();
+  /* Priority field is stored left-aligned in an 8-bit field; only the
+   * top __NVIC_PRIO_BITS are implemented. Shift 'prio' into the MSBs.
+   */
+  const uint32_t shift = 8U - (uint32_t)__NVIC_PRIO_BITS;
+  uint32_t basepri_val = (prio << shift) & 0xFFU;
+
+  /* Write BASEPRI then ensure the write takes effect before continuing. */
+  __set_BASEPRI(basepri_val);
+  __DSB(); __ISB();
+  return prev;
+}
+
+/**
+ * Restore prior BASEPRI value returned by basepri_set_threshold().
+ */
+void basepri_restore(uint32_t previous_basepri)
+{
+  __set_BASEPRI(previous_basepri);
+  __DSB(); __ISB();
+}
+
+/* Usage example:
+ * uint32_t old = basepri_set_threshold(2); // allow priorities 0 and 1, block 2+
+ * // critical work here (keep short)
+ * basepri_restore(old);
+ *
+ * Notes:
+ * - 'prio' is the numeric priority (0..(2^__NVIC_PRIO_BITS -1)).
+ * - If you call HAL_NVIC_SetPriority(IRQn, preempt, sub) the effective
+ *   numeric priority encoded into the NVIC depends on the priority
+ *   grouping; simplest approach is to pick values consistent with the
+ *   preempt field you use when calling HAL_NVIC_SetPriority.
+ * - Avoid long blocking sections; use BASEPRI to prevent lower-priority
+ *   interrupts from preempting time-critical code while still allowing
+ *   higher-priority handlers to run.
+ */
+
 
 void calcAvgSpeed(void) {
     // Calculate measured average speed. The minus sign (-) is because motors spin in opposite directions
@@ -1693,7 +1750,7 @@ void handleTimeout(void) {
     #endif
 #if defined(ENCODER_X) || defined(ENCODER_Y)
   // In case of timeout bring the system to a Safe State
-  if ((timeoutFlgADC || timeoutFlgSerial || timeoutFlgGen) && (!encoder_alignment_active())) {
+  if ((timeoutFlgADC || timeoutFlgSerial || timeoutFlgGen || DLVPA() || overcurrent_fault()) && (!encoder_alignment_active())) {
       ctrlModReq  = OPEN_MODE;                                          // Request OPEN_MODE. This will bring the motor power to 0 in a controlled way
       input1[inIdx].cmd  = 0;
       input2[inIdx].cmd  = 0;
@@ -2302,7 +2359,7 @@ void poweroffPressCheck(void) {
 
 
 /* =========================== Filtering Functions =========================== */
-
+#if !defined(SW_PWM_RIGHT) && !defined(SW_PWM_LEFT) && !defined(HW_PWM)
   /* Low pass filter fixed-point 32 bits: fixdt(1,32,16)
   * Max:  32767.99998474121
   * Min: -32768
@@ -2358,8 +2415,33 @@ void rateLimiter16(int16_t u, int16_t rate, int16_t *y) {
 
   *y = q0 + *y;
 }
+#else
 
+void filtLowPass32(int32_t u, uint16_t coef, int32_t *y) {
+  int64_t tmp;  
+  tmp = ((int64_t)((u << 4) - (*y >> 12)) * coef) >> 4;
+  tmp = CLAMP(tmp, -2147483648LL, 2147483647LL);  // Overflow protection: 2147483647LL = 2^31 - 1
+  *y = (int32_t)tmp + (*y);
+}
 
+void rateLimiter16(int16_t u, int16_t rate, int16_t *y) {
+  int16_t q0;
+  int16_t q1;
+
+  q0 = u  - *y;
+
+  if (q0 > rate) {
+    q0 = rate;
+  } else {
+    q1 = -rate;
+    if (q0 < q1) {
+      q0 = q1;
+    }
+  }
+  *y = q0 + *y;
+}
+
+#endif
   /* mixerFcn(rtu_speed, rtu_steer, &rty_speedR, &rty_speedL); 
   * Inputs:       rtu_speed, rtu_steer                  = fixdt(1,16,4)
   * Outputs:      rty_speedR, rty_speedL                = int16_t
