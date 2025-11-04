@@ -3,9 +3,9 @@
  *
  * Code generated for Simulink model 'BLDC_controller'.
  *
- * Model version                  : 1.1297
- * Simulink Coder version         : 8.13 (R2017b) 24-Jul-2017
- * C/C++ source code generated on : Sun Mar  6 11:02:11 2022
+ * Model version                  : 16.9
+ * Simulink Coder version         : 25.1 (R2025a) 21-Nov-2024
+ * C/C++ source code generated on : Sat Oct 25 19:14:09 2025
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex
@@ -17,159 +17,159 @@
  * Validation result: Not run
  */
 
-#ifndef RTW_HEADER_BLDC_controller_h_
-#define RTW_HEADER_BLDC_controller_h_
-#include "rtwtypes.h"
+#ifndef BLDC_controller_h_
+#define BLDC_controller_h_
 #ifndef BLDC_controller_COMMON_INCLUDES_
-# define BLDC_controller_COMMON_INCLUDES_
+#define BLDC_controller_COMMON_INCLUDES_
 #include "rtwtypes.h"
 #endif                                 /* BLDC_controller_COMMON_INCLUDES_ */
-
-/* Macros for accessing real-time model data structure */
 
 /* Forward declaration for rtModel */
 typedef struct tag_RTM RT_MODEL;
 
-/* Block signals and states (auto storage) for system '<S13>/Counter' */
+/* Block signals and states (default storage) for system '<S13>/Counter' */
 typedef struct {
   int16_T UnitDelay_DSTATE;            /* '<S18>/UnitDelay' */
 } DW_Counter;
 
-/* Block signals and states (auto storage) for system '<S50>/Low_Pass_Filter' */
+/* Block signals and states (default storage) for system '<S50>/Low_Pass_Filter' */
 typedef struct {
   int32_T UnitDelay1_DSTATE[2];        /* '<S56>/UnitDelay1' */
 } DW_Low_Pass_Filter;
 
-/* Block signals and states (auto storage) for system '<S25>/Counter' */
+/* Block signals and states (default storage) for system '<S25>/Counter' */
 typedef struct {
   uint16_T UnitDelay_DSTATE;           /* '<S30>/UnitDelay' */
-} DW_Counter_b;
+} DW_Counter_d;
 
-/* Block signals and states (auto storage) for system '<S21>/either_edge' */
+/* Block signals and states (default storage) for system '<S21>/either_edge' */
 typedef struct {
   boolean_T UnitDelay_DSTATE;          /* '<S26>/UnitDelay' */
 } DW_either_edge;
 
-/* Block signals and states (auto storage) for system '<S20>/Debounce_Filter' */
+/* Block signals and states (default storage) for system '<S20>/Debounce_Filter' */
 typedef struct {
-  DW_either_edge either_edge_p;        /* '<S21>/either_edge' */
-  DW_Counter_b Counter_e;              /* '<S24>/Counter' */
-  DW_Counter_b Counter_n1;             /* '<S25>/Counter' */
+  DW_either_edge either_edge_n;        /* '<S21>/either_edge' */
+  DW_Counter_d Counter_n;              /* '<S24>/Counter' */
+  DW_Counter_d Counter_e2;             /* '<S25>/Counter' */
   boolean_T UnitDelay_DSTATE;          /* '<S21>/UnitDelay' */
 } DW_Debounce_Filter;
 
-/* Block signals and states (auto storage) for system '<S83>/I_backCalc_fixdt' */
+/* Block signals and states (default storage) for system '<S83>/I_backCalc_fixdt' */
 typedef struct {
   int32_T UnitDelay_DSTATE;            /* '<S88>/UnitDelay' */
-  int32_T UnitDelay_DSTATE_m;          /* '<S90>/UnitDelay' */
+  int32_T UnitDelay_DSTATE_a;          /* '<S90>/UnitDelay' */
 } DW_I_backCalc_fixdt;
 
-/* Block signals and states (auto storage) for system '<S63>/PI_clamp_fixdt' */
+/* Block signals and states (default storage) for system '<S63>/PI_clamp_fixdt' */
 typedef struct {
   int32_T ResettableDelay_DSTATE;      /* '<S77>/Resettable Delay' */
-  uint8_T icLoad;                      /* '<S77>/Resettable Delay' */
   boolean_T UnitDelay1_DSTATE;         /* '<S74>/UnitDelay1' */
+  boolean_T icLoad;                    /* '<S77>/Resettable Delay' */
 } DW_PI_clamp_fixdt;
 
-/* Block signals and states (auto storage) for system '<S61>/PI_clamp_fixdt' */
+/* Block signals and states (default storage) for system '<S61>/PI_clamp_fixdt' */
 typedef struct {
   int32_T ResettableDelay_DSTATE;      /* '<S67>/Resettable Delay' */
-  uint8_T icLoad;                      /* '<S67>/Resettable Delay' */
   boolean_T UnitDelay1_DSTATE;         /* '<S65>/UnitDelay1' */
-} DW_PI_clamp_fixdt_m;
+  boolean_T icLoad;                    /* '<S67>/Resettable Delay' */
+} DW_PI_clamp_fixdt_e;
 
-/* Block signals and states (auto storage) for system '<S62>/PI_clamp_fixdt' */
+/* Block signals and states (default storage) for system '<S62>/PI_clamp_fixdt' */
 typedef struct {
   int16_T ResettableDelay_DSTATE;      /* '<S72>/Resettable Delay' */
-  uint8_T icLoad;                      /* '<S72>/Resettable Delay' */
   boolean_T UnitDelay1_DSTATE;         /* '<S69>/UnitDelay1' */
-} DW_PI_clamp_fixdt_g;
+  boolean_T icLoad;                    /* '<S72>/Resettable Delay' */
+} DW_PI_clamp_fixdt_e5;
 
-/* Block signals and states (auto storage) for system '<Root>' */
+/* Block signals and states (default storage) for system '<Root>' */
 typedef struct {
-  DW_PI_clamp_fixdt_g PI_clamp_fixdt_kh;/* '<S62>/PI_clamp_fixdt' */
-  DW_PI_clamp_fixdt_m PI_clamp_fixdt_l4;/* '<S61>/PI_clamp_fixdt' */
-  DW_PI_clamp_fixdt PI_clamp_fixdt_i;  /* '<S63>/PI_clamp_fixdt' */
-  DW_I_backCalc_fixdt I_backCalc_fixdt_j;/* '<S82>/I_backCalc_fixdt' */
+  DW_PI_clamp_fixdt_e5 PI_clamp_fixdt_eq;/* '<S62>/PI_clamp_fixdt' */
+  DW_PI_clamp_fixdt_e PI_clamp_fixdt_jc;/* '<S61>/PI_clamp_fixdt' */
+  DW_PI_clamp_fixdt PI_clamp_fixdt_eo; /* '<S63>/PI_clamp_fixdt' */
+  DW_I_backCalc_fixdt I_backCalc_fixdt_h;/* '<S82>/I_backCalc_fixdt' */
   DW_I_backCalc_fixdt I_backCalc_fixdt1;/* '<S83>/I_backCalc_fixdt1' */
-  DW_I_backCalc_fixdt I_backCalc_fixdt_i;/* '<S83>/I_backCalc_fixdt' */
-  DW_either_edge either_edge_i;        /* '<S20>/either_edge' */
-  DW_Debounce_Filter Debounce_Filter_k;/* '<S20>/Debounce_Filter' */
-  DW_Low_Pass_Filter Low_Pass_Filter_m;/* '<S50>/Low_Pass_Filter' */
-  DW_Counter Counter_e;                /* '<S13>/Counter' */
+  DW_I_backCalc_fixdt I_backCalc_fixdt_c;/* '<S83>/I_backCalc_fixdt' */
+  DW_either_edge either_edge_j;        /* '<S20>/either_edge' */
+  DW_Debounce_Filter Debounce_Filter_e;/* '<S20>/Debounce_Filter' */
+  DW_Low_Pass_Filter Low_Pass_Filter_e;/* '<S50>/Low_Pass_Filter' */
+  DW_Counter Counter_c;                /* '<S13>/Counter' */
   int32_T Divide1;                     /* '<S81>/Divide1' */
   int32_T UnitDelay_DSTATE;            /* '<S40>/UnitDelay' */
-  int16_T Gain4_e[3];                  /* '<S57>/Gain4' */
+  int16_T Gain4_o[3];                  /* '<S57>/Gain4' */
   int16_T DataTypeConversion[2];       /* '<S56>/Data Type Conversion' */
-  int16_T z_counterRawPrev;            /* '<S17>/z_counterRawPrev' */
   int16_T Merge;                       /* '<S59>/Merge' */
   int16_T Switch1;                     /* '<S78>/Switch1' */
-  int16_T Vd_max1;                     /* '<S80>/Vd_max1' */
   int16_T Gain3;                       /* '<S80>/Gain3' */
+  int16_T OutportBufferForVd_max;
   int16_T Vq_max_M1;                   /* '<S80>/Vq_max_M1' */
   int16_T Gain5;                       /* '<S80>/Gain5' */
-  int16_T i_max;                       /* '<S80>/i_max' */
-  int16_T Divide1_n;                   /* '<S80>/Divide1' */
+  int16_T Divide1_d;                   /* '<S80>/Divide1' */
   int16_T Gain1;                       /* '<S80>/Gain1' */
   int16_T Gain4;                       /* '<S80>/Gain4' */
-  int16_T Switch2_i;                   /* '<S87>/Switch2' */
-  int16_T Switch2_o;                   /* '<S93>/Switch2' */
-  int16_T Switch2_a;                   /* '<S91>/Switch2' */
+  int16_T OutportBufferForid_max;
+  int16_T Switch2_g;                   /* '<S87>/Switch2' */
+  int16_T Switch2_p;                   /* '<S93>/Switch2' */
+  int16_T Switch2_b;                   /* '<S91>/Switch2' */
+  int16_T OutportBufferForr_fieldWeak;
   int16_T Divide3;                     /* '<S42>/Divide3' */
   int16_T Merge1;                      /* '<S33>/Merge1' */
   int16_T Abs1;                        /* '<S5>/Abs1' */
-  int16_T Abs5_h;                      /* '<S50>/Abs5' */
+  int16_T OutportBufferForiqAbs;
+  int16_T Abs5_d;                      /* '<S50>/Abs5' */
+  int16_T OutportBufferForid_f;
   int16_T Divide11;                    /* '<S17>/Divide11' */
-  int16_T r_sin_M1;                    /* '<S52>/r_sin_M1' */
-  int16_T r_cos_M1;                    /* '<S52>/r_cos_M1' */
+  int16_T r_sin_M1_1;                  /* '<S52>/r_sin_M1' */
+  int16_T r_cos_M1_1;                  /* '<S52>/r_cos_M1' */
+  int16_T z_counterRawPrev;            /* '<S17>/z_counterRawPrev' */
   int16_T UnitDelay3_DSTATE;           /* '<S13>/UnitDelay3' */
   int16_T UnitDelay4_DSTATE;           /* '<S17>/UnitDelay4' */
   int16_T UnitDelay2_DSTATE;           /* '<S17>/UnitDelay2' */
-  int16_T UnitDelay3_DSTATE_o;         /* '<S17>/UnitDelay3' */
+  int16_T UnitDelay3_DSTATE_k;         /* '<S17>/UnitDelay3' */
   int16_T UnitDelay5_DSTATE;           /* '<S17>/UnitDelay5' */
-  int16_T UnitDelay4_DSTATE_e;         /* '<S13>/UnitDelay4' */
-  int16_T UnitDelay4_DSTATE_eu;        /* '<S8>/UnitDelay4' */
-  int8_T Switch2_e;                    /* '<S12>/Switch2' */
-  int8_T UnitDelay2_DSTATE_b;          /* '<S12>/UnitDelay2' */
+  int16_T UnitDelay4_DSTATE_f;         /* '<S13>/UnitDelay4' */
+  int16_T UnitDelay4_DSTATE_a;         /* '<S8>/UnitDelay4' */
+  int8_T Switch2_a;                    /* '<S12>/Switch2' */
+  int8_T UnitDelay2_DSTATE_o;          /* '<S12>/UnitDelay2' */
   int8_T If1_ActiveSubsystem;          /* '<S7>/If1' */
   int8_T If2_ActiveSubsystem;          /* '<S7>/If2' */
-  int8_T If1_ActiveSubsystem_j;        /* '<S47>/If1' */
+  int8_T If1_ActiveSubsystem_f;        /* '<S47>/If1' */
   int8_T SwitchCase_ActiveSubsystem;   /* '<S59>/Switch Case' */
   int8_T If1_ActiveSubsystem_a;        /* '<S59>/If1' */
-  int8_T If1_ActiveSubsystem_o;        /* '<S48>/If1' */
-  int8_T SwitchCase_ActiveSubsystem_d; /* '<S80>/Switch Case' */
-  int8_T If2_ActiveSubsystem_f;        /* '<S33>/If2' */
+  int8_T If1_ActiveSubsystem_b;        /* '<S48>/If1' */
+  int8_T SwitchCase_ActiveSubsystem_o; /* '<S80>/Switch Case' */
+  int8_T If2_ActiveSubsystem_k;        /* '<S33>/If2' */
   int8_T If2_ActiveSubsystem_a;        /* '<S45>/If2' */
   uint8_T z_ctrlMod;                   /* '<S5>/F03_02_Control_Mode_Manager' */
-  uint8_T UnitDelay3_DSTATE_fy;        /* '<S10>/UnitDelay3' */
+  uint8_T Switch1_n;                   /* '<S20>/Switch1' */
+  uint8_T UnitDelay3_DSTATE_f;         /* '<S10>/UnitDelay3' */
   uint8_T UnitDelay1_DSTATE;           /* '<S10>/UnitDelay1' */
-  uint8_T UnitDelay2_DSTATE_f;         /* '<S10>/UnitDelay2' */
-  uint8_T UnitDelay_DSTATE_e;          /* '<S20>/UnitDelay' */
-  uint8_T is_active_c1_BLDC_controller;/* '<S5>/F03_02_Control_Mode_Manager' */
-  uint8_T is_c1_BLDC_controller;       /* '<S5>/F03_02_Control_Mode_Manager' */
+  uint8_T UnitDelay2_DSTATE_k;         /* '<S10>/UnitDelay2' */
+  uint8_T is_active_c2_BLDC_controller;/* '<S5>/F03_02_Control_Mode_Manager' */
+  uint8_T is_c2_BLDC_controller;       /* '<S5>/F03_02_Control_Mode_Manager' */
   uint8_T is_ACTIVE;                   /* '<S5>/F03_02_Control_Mode_Manager' */
-  boolean_T Merge_p;                   /* '<S21>/Merge' */
+  boolean_T Merge_a;                   /* '<S21>/Merge' */
   boolean_T dz_cntTrnsDet;             /* '<S17>/dz_cntTrnsDet' */
-  boolean_T UnitDelay2_DSTATE_c;       /* '<S2>/UnitDelay2' */
-  boolean_T UnitDelay5_DSTATE_m;       /* '<S2>/UnitDelay5' */
+  boolean_T UnitDelay2_DSTATE_g;       /* '<S2>/UnitDelay2' */
+  boolean_T UnitDelay5_DSTATE_l;       /* '<S2>/UnitDelay5' */
   boolean_T UnitDelay6_DSTATE;         /* '<S2>/UnitDelay6' */
-  boolean_T UnitDelay_DSTATE_b;        /* '<S39>/UnitDelay' */
-  boolean_T UnitDelay1_DSTATE_n;       /* '<S17>/UnitDelay1' */
+  boolean_T UnitDelay_DSTATE_c;        /* '<S39>/UnitDelay' */
+  boolean_T UnitDelay1_DSTATE_g;       /* '<S17>/UnitDelay1' */
   boolean_T n_commDeacv_Mode;          /* '<S13>/n_commDeacv' */
   boolean_T dz_cntTrnsDet_Mode;        /* '<S17>/dz_cntTrnsDet' */
 } DW;
 
-/* Constant parameters (auto storage) */
+/* Constant parameters (default storage) */
 typedef struct {
-  /* Computed Parameter: r_sin_M1_Table
+  /* Computed Parameter: r_sin_M1_1_Table
    * Referenced by: '<S52>/r_sin_M1'
    */
-  int16_T r_sin_M1_Table[181];
+  int16_T r_sin_M1_1_Table[181];
 
-  /* Computed Parameter: r_cos_M1_Table
+  /* Computed Parameter: r_cos_M1_1_Table
    * Referenced by: '<S52>/r_cos_M1'
    */
-  int16_T r_cos_M1_Table[181];
+  int16_T r_cos_M1_1_Table[181];
 
   /* Computed Parameter: r_sin3PhaA_M1_Table
    * Referenced by: '<S96>/r_sin3PhaA_M1'
@@ -202,7 +202,7 @@ typedef struct {
   int8_T vec_hallToPos_Value[8];
 } ConstP;
 
-/* External inputs (root inport signals with auto storage) */
+/* External inputs (root inport signals with default storage) */
 typedef struct {
   boolean_T b_motEna;                  /* '<Root>/b_motEna' */
   uint8_T z_ctrlModReq;                /* '<Root>/z_ctrlModReq' */
@@ -214,9 +214,10 @@ typedef struct {
   int16_T i_phaBC;                     /* '<Root>/i_phaBC' */
   int16_T i_DCLink;                    /* '<Root>/i_DCLink' */
   int16_T a_mechAngle;                 /* '<Root>/a_mechAngle' */
+  real32_T a_mechAnglef;               /* '<Root>/a_mechAnglef' */
 } ExtU;
 
-/* External outputs (root outports fed by signals with auto storage) */
+/* External outputs (root outports fed by signals with default storage) */
 typedef struct {
   int16_T DC_phaA;                     /* '<Root>/DC_phaA' */
   int16_T DC_phaB;                     /* '<Root>/DC_phaB' */
@@ -228,7 +229,7 @@ typedef struct {
   int16_T id;                          /* '<Root>/id' */
 } ExtY;
 
-/* Parameters (auto storage) */
+/* Parameters (default storage) */
 struct P_ {
   int32_T dV_openRate;                 /* Variable: dV_openRate
                                         * Referenced by: '<S37>/dV_openRate'
@@ -249,15 +250,6 @@ struct P_ {
                                         *   '<S13>/z_maxCntRst2'
                                         *   '<S13>/UnitDelay3'
                                         *   '<S17>/z_counter'
-                                        */
-  uint16_T cf_speedCoef;               /* Variable: cf_speedCoef
-                                        * Referenced by: '<S17>/cf_speedCoef'
-                                        */
-  uint16_T t_errDequal;                /* Variable: t_errDequal
-                                        * Referenced by: '<S20>/t_errDequal'
-                                        */
-  uint16_T t_errQual;                  /* Variable: t_errQual
-                                        * Referenced by: '<S20>/t_errQual'
                                         */
   int16_T Vd_max;                      /* Variable: Vd_max
                                         * Referenced by:
@@ -346,14 +338,14 @@ struct P_ {
                                         *   '<S82>/cf_nKiLimProt'
                                         *   '<S83>/cf_nKiLimProt'
                                         */
-  uint8_T n_polePairs;                 /* Variable: n_polePairs
-                                        * Referenced by: '<S15>/n_polePairs'
+  uint16_T cf_speedCoef;               /* Variable: cf_speedCoef
+                                        * Referenced by: '<S17>/cf_speedCoef'
                                         */
-  uint8_T z_ctrlTypSel;                /* Variable: z_ctrlTypSel
-                                        * Referenced by: '<S1>/z_ctrlTypSel'
+  uint16_T t_errDequal;                /* Variable: t_errDequal
+                                        * Referenced by: '<S20>/t_errDequal'
                                         */
-  uint8_T z_selPhaCurMeasABC;          /* Variable: z_selPhaCurMeasABC
-                                        * Referenced by: '<S49>/z_selPhaCurMeasABC'
+  uint16_T t_errQual;                  /* Variable: t_errQual
+                                        * Referenced by: '<S20>/t_errQual'
                                         */
   boolean_T b_angleMeasEna;            /* Variable: b_angleMeasEna
                                         * Referenced by:
@@ -371,9 +363,18 @@ struct P_ {
                                         *   '<S6>/b_fieldWeakEna'
                                         *   '<S97>/b_fieldWeakEna'
                                         */
+  uint8_T n_polePairs;                 /* Variable: n_polePairs
+                                        * Referenced by: '<S15>/n_polePairs'
+                                        */
+  uint8_T z_ctrlTypSel;                /* Variable: z_ctrlTypSel
+                                        * Referenced by: '<S1>/z_ctrlTypSel'
+                                        */
+  uint8_T z_selPhaCurMeasABC;          /* Variable: z_selPhaCurMeasABC
+                                        * Referenced by: '<S49>/z_selPhaCurMeasABC'
+                                        */
 };
 
-/* Parameters (auto storage) */
+/* Parameters (default storage) */
 typedef struct P_ P;
 
 /* Real-time Model Data Structure */
@@ -384,7 +385,8 @@ struct tag_RTM {
   DW *dwork;
 };
 
-/* Constant parameters (auto storage) */
+
+/* Constant parameters (default storage) */
 extern const ConstP rtConstP;
 
 /* Model entry point functions */
@@ -396,6 +398,7 @@ extern void BLDC_controller_step(RT_MODEL *const rtM);
  *
  * Block '<S13>/Scope2' : Unused code path elimination
  * Block '<S14>/Scope' : Unused code path elimination
+ * Block '<S15>/Scope1' : Unused code path elimination
  * Block '<S41>/Data Type Duplicate' : Unused code path elimination
  * Block '<S41>/Data Type Propagation' : Unused code path elimination
  * Block '<S43>/Data Type Duplicate' : Unused code path elimination
@@ -541,7 +544,7 @@ extern void BLDC_controller_step(RT_MODEL *const rtM);
  * '<S97>'  : 'BLDCmotor_FOC_R2017b_fixdt/BLDC_controller/F06_Control_Type_Management/SIN_Method/Final_Phase_Advance_Calculation'
  * '<S98>'  : 'BLDCmotor_FOC_R2017b_fixdt/BLDC_controller/F06_Control_Type_Management/SIN_Method/Final_Phase_Advance_Calculation/Modulo_fixdt'
  */
-#endif                                 /* RTW_HEADER_BLDC_controller_h_ */
+#endif                               
 
 /*
  * File trailer for generated code.

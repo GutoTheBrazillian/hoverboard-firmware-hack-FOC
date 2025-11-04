@@ -25,6 +25,7 @@
 
 #include "stm32f1xx_hal.h"
 #include "config.h"
+#include "rtwtypes.h" 
 
 #define LEFT_HALL_U_PIN GPIO_PIN_5
 #define LEFT_HALL_V_PIN GPIO_PIN_6
@@ -102,13 +103,32 @@
 
 // #define DCLINK_ADC ADC3
 // #define DCLINK_CHANNEL
+#ifdef ENCODER_Y
+#define ENCODER_Y_CPR              (ENCODER_Y_PPR * 4)
+#define ENCODER_Y_TIMER            TIM3
+#define ENCODER_Y_CHA_PORT         GPIOB
+#define ENCODER_Y_CHB_PORT         GPIOB
+#define ENCODER_Y_CHA_PIN          GPIO_PIN_4
+#define ENCODER_Y_CHB_PIN          GPIO_PIN_5
+#endif
+
+#ifdef ENCODER_X
+#define ENCODER_X_CPR              (ENCODER_X_PPR * 4)
+#define ENCODER_X_TIMER            TIM4
+#define ENCODER_X_CHA_PORT         GPIOB
+#define ENCODER_X_CHB_PORT         GPIOB
+#define ENCODER_X_CHA_PIN          GPIO_PIN_7
+#define ENCODER_X_CHB_PIN          GPIO_PIN_6
+#endif
 
 #if BOARD_VARIANT == 0
 #define DCLINK_PIN GPIO_PIN_2
 #define DCLINK_PORT GPIOC
+#define DCLINK_ADC_CHANNEL ADC_CHANNEL_12
 #elif BOARD_VARIANT == 1
 #define DCLINK_PIN GPIO_PIN_1
 #define DCLINK_PORT GPIOA
+#define DCLINK_ADC_CHANNEL ADC_CHANNEL_1
 #endif
 
 // #define DCLINK_PULLUP 30000
@@ -144,6 +164,9 @@
 #define BUTTON_PIN GPIO_PIN_9
 #define BUTTON_PORT GPIOB
 #endif
+#if defined(ANALOG_BUTTON)
+  #define BUTTON_ADC_CHANNEL        ADC_CHANNEL_1
+#endif
 
 #if BOARD_VARIANT == 0
 #define CHARGER_PIN GPIO_PIN_12
@@ -161,16 +184,57 @@
 #define PPM_PORT            GPIOB
 #endif
 
-#if defined(CONTROL_PWM_LEFT)
+#if defined(RC_PWM_LEFT)
 #define PWM_PIN_CH1         GPIO_PIN_2
 #define PWM_PORT_CH1        GPIOA
 #define PWM_PIN_CH2         GPIO_PIN_3
 #define PWM_PORT_CH2        GPIOA
-#elif defined(CONTROL_PWM_RIGHT)
+#elif defined(RC_PWM_RIGHT)
 #define PWM_PIN_CH1         GPIO_PIN_10
 #define PWM_PORT_CH1        GPIOB
 #define PWM_PIN_CH2         GPIO_PIN_11
 #define PWM_PORT_CH2        GPIOB
+#endif
+
+#if defined(SW_PWM_LEFT) 
+#define PWM_PIN_CH1         GPIO_PIN_2
+#define PWM_PORT_CH1        GPIOA
+#define PWM_PIN_CH2         GPIO_PIN_3
+#define PWM_PORT_CH2        GPIOA
+#elif defined(SW_PWM_RIGHT)
+#define PWM_PIN_CH1         GPIO_PIN_10
+#define PWM_PORT_CH1        GPIOB
+#define PWM_PIN_CH2         GPIO_PIN_11
+#define PWM_PORT_CH2        GPIOB
+#endif
+
+#if defined(HW_PWM)
+#define PWM_PIN_CH2         GPIO_PIN_5
+#define PWM_PORT_CH2        GPIOB
+#endif
+
+// External brake resistor PWM configuration
+// Select which channel to use for the external brake resistor PWM
+// Change Timer and pins if using analog input
+#if defined(EXTBRK_USE_CH3)
+#define EXTBRK_TIM             TIM5
+#define EXTBRK_TIM_CHANNEL     TIM_CHANNEL_3
+#define EXTBRK_PIN             GPIO_PIN_2
+#define EXTBRK_PORT            GPIOA
+#define EXT_PWM_BRK            TIM5->CCR3
+#elif defined(EXTBRK_USE_CH4)
+#define EXTBRK_TIM             TIM5
+#define EXTBRK_TIM_CHANNEL     TIM_CHANNEL_4
+#define EXTBRK_PIN             GPIO_PIN_3
+#define EXTBRK_PORT            GPIOA
+#define EXT_PWM_BRK            TIM5->CCR4
+#endif
+
+#if defined(HOCP)
+#define TIM1_BKIN_PIN       GPIO_PIN_6
+#define TIM1_BKIN_PORT      GPIOA
+#define TIM8_BKIN_PIN       GPIO_PIN_12
+#define TIM8_BKIN_PORT      GPIOB
 #endif
 
 #if defined(SUPPORT_BUTTONS_LEFT)
@@ -216,17 +280,77 @@
 #endif
 
 
-typedef struct {
-  uint16_t dcr; 
-  uint16_t dcl; 
+
+typedef struct { // Structure for ADC1 and ADC2 values
+  uint16_t dcr;
+  uint16_t dcl;
   uint16_t rlA;
   uint16_t rlB;
   uint16_t rrB;
   uint16_t rrC;
-  uint16_t batt1;
-  uint16_t l_tx2;
+  #if defined(ENABLE_BOARD_TEMP_SENSOR)
   uint16_t temp;
-  uint16_t l_rx2;
+  #endif
+
+} adc12_named_samples_t;
+#ifndef ENABLE_BOARD_TEMP_SENSOR
+#define ADC12_CONV_COUNT 3
+#else
+#define ADC12_CONV_COUNT 4
+#endif  
+typedef union {
+  adc12_named_samples_t value;
+  uint32_t raw[ADC12_CONV_COUNT];
+} adc12_dma_buffer_t;
+
+typedef struct {  // Structure for ADC3 values
+  #if defined(ANALOG_BUTTON)
+  uint16_t button;
+#endif
+  uint16_t r_tx2;
+  uint16_t r_rx2;
+  uint16_t batt1;
+} adc3_named_samples_t;
+#ifndef ANALOG_BUTTON
+ #define ADC3_CONV_COUNT 3 
+#else
+ #define ADC3_CONV_COUNT 4
+#endif
+
+#if defined(HW_PWM)
+extern volatile boolean_T hw_pwm_ready;
+void calc_hw_pwm(void);
+#endif
+
+#if defined(CONTROL_PPM_LEFT) || defined(CONTROL_PPM_RIGHT)
+extern volatile boolean_T ppm_ready;
+void calc_ppm(void);
+#endif
+
+#if defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)
+extern volatile boolean_T sw_pwm_ready_ch1;
+extern volatile boolean_T sw_pwm_ready_ch2;
+void calc_sw_pwm_ch1(void);
+void calc_sw_pwm_ch2(void);
+#endif
+
+#if defined(RC_PWM_LEFT) || defined(RC_PWM_RIGHT)
+extern volatile boolean_T rc_pwm_ready_ch1;
+extern volatile boolean_T rc_pwm_ready_ch2;
+void calc_rc_pwm_ch1(void);
+void calc_rc_pwm_ch2(void);
+#endif
+
+
+typedef union {
+  adc3_named_samples_t value;
+  uint16_t raw[ADC3_CONV_COUNT]; 
+} adc3_dma_buffer_t;
+
+
+typedef struct {
+  adc12_dma_buffer_t adc12;
+  adc3_dma_buffer_t adc3;
 } adc_buf_t;
 
 typedef enum {
