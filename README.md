@@ -32,10 +32,16 @@ For information on all improvments see [Pull Request #3](https://github.com/SiMa
 
 ---
 
-## New Configurations
+## My Use Case: Direct Drive FFB Wheelbase, FFB Joystick, Seatbelt Tensioner, Rudder Pedals
+Wheelbase and Joystick project [Arduino-FFB-wheel](https://github.com/SiMachines/hoverboard-firmware-hack-FOC/wiki/Arduino%E2%80%90FFB%E2%80%90wheel-(Single-Axis))  by Ranenbg
 
-- **ONE_AXIS_VARIANT**: Single motor control with AB encoder, hardware pwm input and internal left driver brake resistor support
-- **TWO_AXIS_VARIANT**: Dual motor control with AB encoders, software pwm input and external brake resistor support
+Wheelbase compatible project [OpenFFB](https://github.com/Ultrawipf/OpenFFBoard)  by UltraWipf 
+
+Any usb controller capable of outputting PWM and Reading ab encoder signals will work, in this case I am using Ranenbs's firmware with arduino pro micro.
+For exact wiring connections and components to get check wiki [page](https://github.com/SiMachines/hoverboard-firmware-hack-FOC/wiki/Direct-Drive-WheelBase)
+
+https://github.com/user-attachments/assets/5eb49f23-4fbd-4733-9945-0fd57906c630
+
 ---
 
 ## Quick Start Guide
@@ -60,11 +66,18 @@ Edit `Inc/config.h` with your specific parameters:
                                         // 10s = 36V (37V - 42V)
                                         // 13s = 48V (48.1V - 54.6V)
 ```
+### Encoder Configuration
 
-#### Motor Configuration
 ```c
-#define N_POLE_PAIRS            15      // Standard hoverboard motors: 15
-                                        // Check your motor specs if different
+#define ENCODER_X
+#define ENCODER_X_PPR              2048     // Your encoder pulses per revolution
+#define ALIGNMENT_X_POWER          6553     // Sensor alignment voltage out of 16000 for HW & SW-PWM, out of 1000 for the others
+```
+#### Internal Brake Resistor 
+Uses the left motor driver as a brake resistor (left motor must be disabled).
+
+```c
+#define INTBRK_L_EN                         // Enable internal brake on left driver
 ```
 ---
 
