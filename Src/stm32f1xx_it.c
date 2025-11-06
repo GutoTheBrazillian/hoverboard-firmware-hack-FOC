@@ -173,7 +173,7 @@ void PendSV_Handler(void) {
 void PPM_SysTick_Callback(void);
 #endif
 
-#if defined(RC_PWM_LEFT) || defined(RC_PWM_RIGHT)|| defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)|| defined(HW_PWM)
+#if defined(RC_PWM_LEFT) || defined(RC_PWM_RIGHT)|| defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)//|| defined(HW_PWM)
 void PWM_SysTick_Callback(void);
 #endif
 
@@ -188,7 +188,7 @@ void SysTick_Handler(void) {
   PPM_SysTick_Callback();
 #endif
 
-#if defined(RC_PWM_LEFT) || defined(RC_PWM_RIGHT)|| defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)|| defined(HW_PWM)
+#if defined(RC_PWM_LEFT) || defined(RC_PWM_RIGHT)|| defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)//|| defined(HW_PWM)
   PWM_SysTick_Callback();
 #endif
   /* USER CODE END SysTick_IRQn 1 */

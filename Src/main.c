@@ -111,7 +111,7 @@ int16_t board_temp_adcFilt = 0;
      volatile boolean_T rc_pwm_ready_ch2 = 0;
 #endif
 #ifdef HW_PWM
-  volatile boolean_T hw_pwm_ready = 0;
+  //volatile boolean_T hw_pwm_ready = 0;
 #endif
 #if defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)
   volatile boolean_T sw_pwm_ready_ch1 = 0;
@@ -402,9 +402,9 @@ int main(void) {
       #endif
 
       #if defined(HW_PWM)
-      if(hw_pwm_ready) {
+      //if(hw_pwm_ready) {
         calc_hw_pwm();
-      }
+      //}
       #endif
 
      #if defined(SW_PWM_LEFT) || defined(SW_PWM_RIGHT)
