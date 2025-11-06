@@ -95,7 +95,7 @@ This project inherits the GPLv3 license from the original [hoverboard-firmware-h
 
 ## Support
 
-For issues specific to encoder and brake resistor functionality, please open an issue in this repository.
+For issues, please open an issue in this repository.
 
 For general hoverboard firmware questions, refer to the [original repository](https://github.com/EFeru/hoverboard-firmware-hack-FOC) and its wiki.
 
